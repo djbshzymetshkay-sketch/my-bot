@@ -11,17 +11,10 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 ADMIN_ID = 7178006484
 
 bot = telebot.TeleBot(TOKEN)
-
-# تنظیمات اتصال واقعی به صرافی XT
-API_KEY = "c25d4d1a-b496-4c2a-a8ee-599cee26b975"
-SECRET_KEY = "4f1f05a92c8c7a642129e38e7f86b9ab149e4d8a"
 BASE_URL = "https://fapi.xt.com"
+TRADINGVIEW_CHART_URL = "https://www.xt.com/en/futures/trade/btc_usdt"
 
-# لینک تصویر اختصاصی شیر و چارت جمشیدزایی
-LION_IMAGE_URL = "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=800"
-
-# دیکشنری موقت برای ذخیره وضعیت تنظیم دستی کاربران
-user_temp_settings = {}
+user_states = {}
 
 def init_db():
   conn = sqlite3.connect("users_xt.db")
@@ -31,6 +24,8 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             username TEXT,
             first_name TEXT,
+            api_key TEXT DEFAULT '',
+            secret_key TEXT DEFAULT '',
             leverage INTEGER DEFAULT 10,
             custom_capital REAL DEFAULT 0.0,
             status TEXT DEFAULT 'inactive',
@@ -43,10 +38,20 @@ def init_db():
 
 init_db()
 
-def fetch_xt_balance():
+def get_user_keys(user_id):
+  conn = sqlite3.connect("users_xt.db")
+  cursor = conn.cursor()
+  cursor.execute("SELECT api_key, secret_key FROM users WHERE user_id = ?", (user_id,))
+  row = cursor.fetchone()
+  conn.close()
+  if row and row[0] and row[1]:
+    return row[0], row[1]
+  return None, None
+
+def fetch_xt_balance(api_key, secret_key):
   endpoint = "/future/user/v1/balance"
   timestamp = str(int(time.time() * 1000))
-  headers = {"xt-app-key": API_KEY, "xt-timestamp": timestamp}
+  headers = {"xt-app-key": api_key, "xt-timestamp": timestamp}
   try:
     response = requests.get(BASE_URL + endpoint, headers=headers, timeout=10).json()
     if response.get("rc") == 0:
@@ -57,7 +62,7 @@ def fetch_xt_balance():
   except Exception:
     return 0.0
 
-def place_real_xt_order_with_sl_tp(symbol, side, quantity, leverage, entry_price):
+def place_real_xt_order(api_key, secret_key, symbol, side, quantity, leverage, entry_price):
   endpoint = "/future/trade/v1/order/create"
   timestamp = str(int(time.time() * 1000))
   
@@ -78,7 +83,7 @@ def place_real_xt_order_with_sl_tp(symbol, side, quantity, leverage, entry_price
       "stopLossPrice": str(stop_loss),
       "takeProfitPrice": str(take_profit)
   }
-  headers = {"xt-app-key": API_KEY, "xt-timestamp": timestamp}
+  headers = {"xt-app-key": api_key, "xt-timestamp": timestamp}
   try:
     response = requests.post(BASE_URL + endpoint, json=params, headers=headers, timeout=10).json()
     if response.get("rc") == 0:
@@ -88,25 +93,19 @@ def place_real_xt_order_with_sl_tp(symbol, side, quantity, leverage, entry_price
   except Exception as e:
     return False, 0, 0, str(e)
 
-# موتور اتوماتیک ترید همراه با تحلیل دلیل ورود
 def auto_trading_worker():
   while True:
-    time.sleep(300)  # بررسی بازار هر ۵ دقیقه
+    time.sleep(120)
     conn = sqlite3.connect("users_xt.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id, leverage, custom_capital FROM users WHERE status = 'active'")
+    cursor.execute("SELECT user_id, api_key, secret_key, leverage, custom_capital FROM users WHERE status = 'active'")
     active_users = cursor.fetchall()
     conn.close()
 
     if not active_users:
       continue
 
-    live_bal = fetch_xt_balance()
-    if live_bal < 1.0:
-      continue
-
     symbol = "BTC_USDT"
-    
     try:
       ticker_url = f"https://sapi.xt.com/v4/market/public/q/ticker/price?symbol={symbol}"
       res = requests.get(ticker_url, timeout=10).json()
@@ -114,16 +113,20 @@ def auto_trading_worker():
         current_price = float(res["result"]["price"])
         
         for u in active_users:
-          uid, leverage, custom_cap = u
-          # استفاده از سرمایه دستی یا محاسبه اتوماتیک ۹۰ درصد موجودی
-          capital_to_use = custom_cap if custom_cap > 0 else (live_bal * 0.9)
-          
+          uid, api_k, sec_k, leverage, custom_cap = u
+          if not api_k or not sec_k:
+            continue
+
+          live_bal = fetch_xt_balance(api_k, sec_k)
+          if live_bal < 1.0:
+            continue
+
+          capital_to_use = custom_cap if custom_cap > 0 else (live_bal * 0.8)
           notional_value = capital_to_use * leverage
           quantity = round(notional_value / current_price, 4)
 
           if quantity > 0:
-            success, sl, tp, msg = place_real_xt_order_with_sl_tp(symbol, "BUY", quantity, leverage, current_price)
-            
+            success, sl, tp, msg = place_real_xt_order(api_k, sec_k, symbol, "BUY", quantity, leverage, current_price)
             if success:
               conn = sqlite3.connect("users_xt.db")
               cursor = conn.cursor()
@@ -131,68 +134,61 @@ def auto_trading_worker():
               conn.commit()
               conn.close()
 
-              entry_reason = (
-                  "شکست مقاومت کلیدی بازه زمانی اخیر همراه با ورود حجم سنگین خرید (Bullish Volume Spike) "
-                  "و تشکیل کندل تأیید صعودی در چارت."
-              )
-
-              signal_caption = (
-                  f"🔥 **شکار سیگنال جدید در صرافی XT**\n"
-                  f"👑 *امپراتوری ترید: امیرعلی جمشیدزایی*\n\n"
+              signal_text = (
+                  f"🔥 **پوزیشن خرید واقعی در صرافی XT باز شد!**\n"
+                  f"👑 *تریدر: امیرعلی جمشیدزایی*\n\n"
                   f"📊 جفت ارز: `BTC/USDT` (Long 🟢)\n"
-                  f"⚡️ لوریج: {leverage}x\n"
-                  f"🎯 نقطه ورود: {current_price}\n"
-                  f"🛑 حد ضرر (Stop Loss): {sl}\n"
-                  f"🎯 حد سود (Take Profit): {tp}\n\n"
-                  f"🧠 **دلیل ورود به معامله:**\n{entry_reason}\n\n"
-                  f"💰 سرمایه درگیر: {capital_to_use:.2f} تتر\n"
-                  f"💪 سود شما با مدیریت ریسک کامل در جریان است!"
+                  f"⚡️ اهرم: {leverage}x\n"
+                  f"🎯 قیمت ورود: {current_price}\n"
+                  f"🛑 حد ضرر: {sl}\n"
+                  f"🎯 حد سود: {tp}\n"
+                  f"💰 سرمایه درگیر: {capital_to_use:.2f} تتر"
               )
+              
+              markup = types.InlineKeyboardMarkup()
+              markup.add(types.InlineKeyboardButton("📈 مشاهده چارت زنده و متحرک بازار", url=TRADINGVIEW_CHART_URL))
+
               try:
-                bot.send_photo(uid, LION_IMAGE_URL, caption=signal_caption, parse_mode="Markdown")
+                bot.send_message(uid, signal_text, reply_markup=markup, parse_mode="Markdown")
               except Exception:
                 pass
     except Exception as e:
-      print(f"Auto trade worker error: {e}")
+      print(f"Error: {e}")
 
 threading.Thread(target=auto_trading_worker, daemon=True).start()
 
-# موتور ارسال گزارش شبانه دقیقاً ساعت ۲۱:۰۰ (ساعت ۹ شب)
 def daily_night_report_worker():
   while True:
     now = datetime.datetime.now()
     if now.hour == 21 and now.minute == 0:
       conn = sqlite3.connect("users_xt.db")
       cursor = conn.cursor()
-      cursor.execute("SELECT user_id, daily_profit, daily_trades FROM users WHERE status = 'active'")
+      cursor.execute("SELECT user_id, api_key, secret_key, daily_profit, daily_trades FROM users WHERE status = 'active'")
       active_users = cursor.fetchall()
-      
-      live_bal = fetch_xt_balance()
 
       for u in active_users:
-        uid, d_profit, d_trades = u
+        uid, api_k, sec_k, d_profit, d_trades = u
+        if not api_k or not sec_k:
+          continue
+        live_bal = fetch_xt_balance(api_k, sec_k)
         profit_percent = (d_profit / live_bal) * 100 if live_bal > 0 else 0
-
-        report_caption = (
-            f"🌙 **گزارش سود ۲۴ ساعت گذشته (ساعت ۲۱:۰۰)**\n"
-            f"👑 *امپراتوری ترید: امیرعلی جمشیدزایی*\n\n"
-            f"📊 کل معاملات انجام شده امروز: {d_trades} معامله\n"
-            f"💰 سود خالص کسب شده در ۲۴ ساعت: {d_profit:+.2f} تتر\n"
-            f"📈 درصد سود نسبت به موجودی: {profit_percent:+.1f}%\n"
-            f"💵 موجودی فعلی صرافی: {live_bal:.2f} تتر\n\n"
-            f"قدرت بازار زیر دست ماست، امیرعلی!"
+        report_text = (
+            f"🌙 **گزارش سود و عملکرد ۲۴ ساعت (ساعت ۲۱:۰۰)**\n\n"
+            f"📊 کل معاملات امروز: {d_trades}\n"
+            f"💰 سود تخمینی: {d_profit:+.2f} تتر ({profit_percent:+.1f}%)\n"
+            f"💵 موجودی فعلی حساب: {live_bal:.2f} تتر"
         )
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("📈 چارت زنده بازار", url=TRADINGVIEW_CHART_URL))
         try:
-          bot.send_photo(uid, LION_IMAGE_URL, caption=report_caption, parse_mode="Markdown")
+          bot.send_message(uid, report_text, reply_markup=markup, parse_mode="Markdown")
         except Exception:
           pass
 
       cursor.execute("UPDATE users SET daily_profit = 0.0, daily_trades = 0")
       conn.commit()
       conn.close()
-      
       time.sleep(70)
-    
     time.sleep(30)
 
 threading.Thread(target=daily_night_report_worker, daemon=True).start()
@@ -205,94 +201,127 @@ def send_welcome(message):
 
   conn = sqlite3.connect("users_xt.db")
   cursor = conn.cursor()
-  cursor.execute(
-      "INSERT OR IGNORE INTO users (user_id, username, first_name) VALUES (?, ?, ?)",
-      (user_id, username, user_name)
-  )
-  cursor.execute(
-      "UPDATE users SET username = ?, first_name = ? WHERE user_id = ?",
-      (username, user_name, user_id)
-  )
+  cursor.execute("INSERT OR IGNORE INTO users (user_id, username, first_name) VALUES (?, ?, ?)", (user_id, username, user_name))
+  cursor.execute("UPDATE users SET username = ?, first_name = ? WHERE user_id = ?", (username, user_name, user_id))
   conn.commit()
   conn.close()
 
   markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+  markup.add(types.KeyboardButton("🔗 اتصال صرافی XT"))
   markup.add(types.KeyboardButton("📊 موجودی واقعی صرافی"))
   markup.add(types.KeyboardButton("⚙️ تنظیم دستی اهرم و سرمایه"))
+  markup.add(types.KeyboardButton("📈 چارت زنده بازار"))
   markup.add(types.KeyboardButton("🚀 شروع ترید اتوماتیک"), types.KeyboardButton("🛑 توقف ترید"))
-
   if user_id == ADMIN_ID:
     markup.add(types.KeyboardButton("👑 پنل مدیریت کل"))
 
-  welcome_text = (
-      "سلام به قلمرو تحلیل حرفه‌ای و ترید اتوماتیک فیوچرز. سرعت، قدرت و دقت در اجرای عملکرد، زیر نظر امیرعلی جمشیدزایی.\n\n"
-      "قابلیت‌ها:\n"
-      "🦁 پوزیشن خودکار همراه با دلیل ورود، حد سود و ضرر • تنظیم دستی اهرم و سرمایه • گزارش سود ساعت ۹ شب • اتصال صرافی XT\n\n"
-      "برای شروع قلمرو، کلیک کنید ⚡"
-  )
+  welcome_text = "سلام امیرعلی! ربات کاملاً آماده ثبت معاملات واقعی در صرافی XT است. از دکمه‌های زیر استفاده کن:"
   bot.send_message(message.chat.id, welcome_text, reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text == "🔗 اتصال صرافی XT")
+def connect_exchange(message):
+  user_states[message.from_user.id] = "waiting_for_api_keys"
+  bot.send_message(
+      message.chat.id,
+      "🔑 **اتصال حساب صرافی XT:**\n\n"
+      "لطفاً API Key و Secret Key صرافی خود را با یک فاصله وارد کنید:\n"
+      "`API_KEY SECRET_KEY`",
+      parse_mode="Markdown"
+  )
 
 @bot.message_handler(func=lambda message: message.text == "📊 موجودی واقعی صرافی")
 def check_real_balance(message):
-  live_bal = fetch_xt_balance()
+  api_k, sec_k = get_user_keys(message.from_user.id)
+  if not api_k or not sec_k:
+    bot.send_message(message.chat.id, "❌ ابتدا حساب صرافی خود را با دکمه «🔗 اتصال صرافی XT» متصل کنید.")
+    return
+  live_bal = fetch_xt_balance(api_k, sec_k)
+  bot.send_message(message.chat.id, f"📊 موجودی قابل معامله در صرافی XT:\n\n💰 {live_bal:.2f} تتر")
+
+@bot.message_handler(func=lambda message: message.text == "📈 چارت زنده بازار")
+def show_live_chart(message):
+  markup = types.InlineKeyboardMarkup()
+  markup.add(types.InlineKeyboardButton("🌐 باز کردن چارت زنده و متحرک", url=TRADINGVIEW_CHART_URL))
   bot.send_message(
       message.chat.id,
-      f"📊 وضعیت حساب واقعی شما در صرافی XT:\n\n💰 موجودی قابل معامله: {live_bal:.2f} تتر",
+      "📈 برای مشاهده چارت زنده و متحرک با تمامی تایم‌فریم‌ها روی دکمه زیر کلیک کنید:",
+      reply_markup=markup
   )
 
 @bot.message_handler(func=lambda message: message.text == "⚙️ تنظیم دستی اهرم و سرمایه")
 def manual_settings_prompt(message):
+  user_states[message.from_user.id] = "waiting_for_manual_settings"
   warning_text = (
-      "⚠️ **اخطار بسیار مهم مدیریت ریسک و سرمایه:**\n\n"
-      "استفاده از اهرم‌های بالا و ورود حجم سنگین از سرمایه در بازار فیوچرز، ریسک لیکویید شدن و از دست رفتن دارایی را به شدت بالا می‌برد. "
-      "مسئولیت تنظیمات دستی به عهده خود شماست.\n\n"
-      "لطفاً تنظیمات خود را به صورت زیر ارسال کنید (مثلاً اهرم ۱۰ و سرمایه ۵۰ تتر):\n"
-      "`10,50`"
+      "⚠️ **اخطار مدیریت ریسک:**\n\n"
+      "استفاده از اهرم بالا ریسک لیکویید شدن دارد. اهرم و سرمایه را به این صورت ارسال کنید:\n"
+      "`اهرم,سرمایه` (مثلاً `20,100` یعنی اهرم ۲۰ و سرمایه ۱۰۰ تتر)"
   )
-  user_temp_settings[message.from_user.id] = "waiting_for_manual_input"
   bot.send_message(message.chat.id, warning_text, parse_mode="Markdown")
 
-@bot.message_handler(func=lambda message: user_temp_settings.get(message.from_user.id) == "waiting_for_manual_input")
-def save_manual_settings(message):
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) in ["waiting_for_api_keys", "waiting_for_manual_settings"])
+def handle_user_inputs(message):
   user_id = message.from_user.id
-  try:
-    parts = message.text.split(",")
-    leverage = int(parts[0].strip())
-    capital = float(parts[1].strip())
+  state = user_states.get(user_id)
 
-    if leverage < 1 or leverage > 125:
-      bot.send_message(message.chat.id, "❌ اهرم باید بین ۱ تا ۱۲۵ باشد.")
-      return
+  if state == "waiting_for_api_keys":
+    try:
+      parts = message.text.split()
+      if len(parts) < 2:
+        bot.send_message(message.chat.id, "❌ فرمت اشتباه است. لطفاً دو کلید را با فاصله بفرستید.")
+        return
+      api_key = parts[0].strip()
+      secret_key = parts[1].strip()
 
-    live_bal = fetch_xt_balance()
-    if capital > live_bal:
-      bot.send_message(message.chat.id, f"❌ سرمایه از موجودی کل شما ({live_bal:.2f} تتر) بیشتر است.")
-      return
+      conn = sqlite3.connect("users_xt.db")
+      cursor = conn.cursor()
+      cursor.execute("UPDATE users SET api_key = ?, secret_key = ? WHERE user_id = ?", (api_key, secret_key, user_id))
+      conn.commit()
+      conn.close()
 
-    conn = sqlite3.connect("users_xt.db")
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET leverage = ?, custom_capital = ? WHERE user_id = ?", (leverage, capital, user_id))
-    conn.commit()
-    conn.close()
+      user_states[user_id] = None
+      bot.send_message(message.chat.id, "✅ اطلاعات صرافی XT ثبت شد!")
+    except Exception:
+      bot.send_message(message.chat.id, "❌ خطا در ثبت اطلاعات.")
 
-    user_temp_settings.pop(user_id, None)
+  elif state == "waiting_for_manual_settings":
+    try:
+      parts = message.text.split(",")
+      leverage = int(parts[0].strip())
+      capital = float(parts[1].strip())
 
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(types.KeyboardButton("🚀 شروع ترید اتوماتیک"))
-    markup.add(types.KeyboardButton("📊 موجودی واقعی صرافی"), types.KeyboardButton("⚙️ تنظیم دستی اهرم و سرمایه"))
+      if leverage < 1 or leverage > 125:
+        bot.send_message(message.chat.id, "❌ اهرم باید بین ۱ تا ۱۲۵ باشد.")
+        return
 
-    bot.send_message(
-        message.chat.id,
-        f"✅ تنظیمات دستی با موفقیت ثبت شد:\n\n- اهرم: {leverage}x\n- سرمایه: {capital} تتر\n\n"
-        f"حالا می‌توانید دکمه شروع اتوماتیک را بزنید:",
-        reply_markup=markup
-    )
-  except Exception:
-    bot.send_message(message.chat.id, "❌ فرمت ورودی اشتباه است. لطفاً به صورت `اهرم,سرمایه` (مثلاً `10,50`) بفرستید.")
+      api_k, sec_k = get_user_keys(user_id)
+      if not api_k or not sec_k:
+        bot.send_message(message.chat.id, "❌ ابتدا صرافی خود را متصل کنید.")
+        return
+
+      live_bal = fetch_xt_balance(api_k, sec_k)
+      if capital > live_bal:
+        bot.send_message(message.chat.id, f"❌ سرمایه از موجودی کل شما ({live_bal:.2f} تتر) بیشتر است.")
+        return
+
+      conn = sqlite3.connect("users_xt.db")
+      cursor = conn.cursor()
+      cursor.execute("UPDATE users SET leverage = ?, custom_capital = ? WHERE user_id = ?", (leverage, capital, user_id))
+      conn.commit()
+      conn.close()
+
+      user_states[user_id] = None
+      bot.send_message(message.chat.id, f"✅ تنظیم شد:\n- اهرم: {leverage}x\n- سرمایه: {capital} تتر")
+    except Exception:
+      bot.send_message(message.chat.id, "❌ فرمت اشتباه است. لطفاً به صورت `20,100` ارسال کنید.", parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message: message.text == "🚀 شروع ترید اتوماتیک")
 def start_trading(message):
   user_id = message.from_user.id
+  api_k, sec_k = get_user_keys(user_id)
+  if not api_k or not sec_k:
+    bot.send_message(message.chat.id, "❌ اول باید حساب صرافی خود را متصل کنید.")
+    return
+
   conn = sqlite3.connect("users_xt.db")
   cursor = conn.cursor()
   cursor.execute("UPDATE users SET status = 'active' WHERE user_id = ?", (user_id,))
@@ -302,15 +331,12 @@ def start_trading(message):
   conn.close()
 
   leverage, custom_cap = row if row else (10, 0)
-  live_bal = fetch_xt_balance()
-  cap_text = f"{custom_cap} تتر (دستی)" if custom_cap > 0 else f"خودکار ({live_bal * 0.9:.2f} تتر)"
+  live_bal = fetch_xt_balance(api_k, sec_k)
+  cap_text = f"{custom_cap} تتر" if custom_cap > 0 else f"خودکار ({live_bal * 0.8:.2f} تتر)"
 
   bot.send_message(
       message.chat.id,
-      f"🚀 موتور ترید اتوماتیک با موفقیت روشن شد!\n\n"
-      f"• اهرم فعال: {leverage}x\n"
-      f"• سرمایه معاملاتی: {cap_text}\n"
-      f"ربات بازار را رصد می‌کند و با حد سود، حد ضرر و دلیل ورود معامله باز می‌کند.",
+      f"🚀 موتور ترید واقعی صرافی XT روشن شد و به زودی پوزیشن باز می‌کند!\n• اهرم فعال: {leverage}x\n• سرمایه: {cap_text}"
   )
 
 @bot.message_handler(func=lambda message: message.text == "🛑 توقف ترید")
@@ -337,19 +363,15 @@ def admin_panel(message):
   users_detail_list = ""
   for idx, (uid, uname, fname, status, lev, cap) in enumerate(all_users, 1):
     status_fa = "فعال ✅" if status == 'active' else "غیرفعال ❌"
-    users_detail_list += f"{idx}. نام: {fname} | آیدی: {uname} | اهرم: {lev}x | سرمایه دستی: {cap} | وضعیت: {status_fa}\n"
+    users_detail_list += f"{idx}. {fname} | {uname} | اهرم: {lev}x | سرمایه: {cap} | {status_fa}\n"
 
-  live_bal = fetch_xt_balance()
   admin_panel_text = (
-      f"👑 پنل مدیریت کل امپراتوری:\n\n"
-      f"- موجودی زنده صرافی XT: {live_bal:.2f} تتر\n"
-      f"- کل کاربران متصل: {total_users}\n"
-      f"- کاربران فعال: {active_users}\n\n"
-      f"📋 لیست کاربران:\n{users_detail_list if users_detail_list else 'کاربری ثبت نشده.'}\n\n"
-      f"قدرت دست ماست، امیرعلی!"
+      f"👑 پنل مدیریت کل:\n"
+      f"- کل کاربران: {total_users} (فعال: {active_users})\n\n"
+      f"📋 لیست:\n{users_detail_list if users_detail_list else 'خالی'}"
   )
-  bot.send_message(message.chat.id, admin_panel_text, parse_mode="Markdown")
+  bot.send_message(message.chat.id, admin_panel_text)
 
 if __name__ == "__main__":
-  print("Complete Bot with Manual Settings and Risk Warning is running...")
   bot.infinity_polling()
+  
