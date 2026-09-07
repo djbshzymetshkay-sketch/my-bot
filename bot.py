@@ -9,7 +9,7 @@ import time
 import requests
 import telebot
 
-# --- تنظیمات اختصاصی و کلیدهای صرافی XT (قرار داده شده داخل کد) ---
+# --- تنظیمات اختصاصی و کلیدهای صرافی XT ---
 TOKEN = "توکن_ربات_تلگرام_شما"
 XT_API_KEY = "c25d4d1a-b496-4c2a-a8ee-599cee26b975"
 XT_SECRET_KEY = "4f1f059a2c87a642129e38e7f86b9ab149e4d8a"
@@ -28,7 +28,6 @@ def get_xt_signature(secret_key, path, method, timestamp, query_string="", body_
   return signature
 
 def check_real_connection_and_balance():
-  """ارتباط واقعی با صرافی XT و دریافت موجودی فیوچرز"""
   try:
     host = "https://fapi.xt.com"
     path = "/v1/balance"
@@ -60,7 +59,6 @@ def check_real_connection_and_balance():
     return False, 0.0
 
 def get_bitcoin_news_sentiment():
-  """بررسی اخبار و احساسات فاندامنتال بازار بیت‌کوین"""
   try:
     url = "https://cryptopanic.com/api/v1/posts/?auth_token=free&currencies=BTC&filter=important"
     res = requests.get(url, timeout=10).json()
@@ -79,34 +77,29 @@ def get_bitcoin_news_sentiment():
         return "SELL", f"اخبار فاندامنتال منفی: {results[0].get('title')[:50]}..."
   except Exception:
     pass
-  return None, "اخبار فاندامنتال خنثی یا عادی"
+  return None, "اخبار فاندامنتال خنثی"
 
 def analyze_world_class_candles_with_news():
-  """ترکیب استراتژی کندل‌خوانی ۱۵ دقیقه‌ای با فاندامنتال اخبار بیت‌کوین"""
   try:
     news_side, news_reason = get_bitcoin_news_sentiment()
-    
     url = "https://sapi.xt.com/v4/market/public/q/kline?symbol=btc_usdt&interval=15m&limit=5"
     res = requests.get(url, timeout=10).json()
     if res.get("rc") == 0 and len(res.get("result", [])) >= 3:
       candles = res["result"]
-      c2 = {"open": float(candles[-2][1]), "close": float(candles[-2][4]), "high": float(candles[-2][2]), "low": float(candles[-2][3])}
-      c3 = {"open": float(candles[-1][1]), "close": float(candles[-1][4]), "high": float(candles[-1][2]), "low": float(candles[-1][3])}
-
+      c3 = {"open": float(candles[-1][1]), "close": float(candles[-1][4])}
       tech_side = "BUY" if c3["close"] >= c3["open"] else "SELL"
       
       if news_side and news_side == tech_side:
         return news_side, f"تایید دوگانه (تکنیکال + اخبار): {news_reason}"
       elif news_side:
-        return news_side, f"سیگنال بر اساس اخبار مهم فاندامنتال: {news_reason}"
+        return news_side, f"سیگنال اخبار فاندامنتال: {news_reason}"
       
-      return tech_side, "سیگنال بر اساس مومنتوم و کندل‌خوانی ۱۵ دقیقه"
+      return tech_side, "سیگنال کندل‌خوانی ۱۵ دقیقه"
   except Exception:
     pass
   return "BUY", "سیگنال روتین بازار"
 
 def send_startup_notification():
-  """ارسال پیام خودکار اتصال موفق به صرافی به محض روشن شدن ربات"""
   time.sleep(3)
   is_connected, balance = check_real_connection_and_balance()
   if is_connected:
@@ -114,10 +107,10 @@ def send_startup_notification():
         f"🟢 **ربات با موفقیت به صرافی XT متصل شد!**\n"
         f"👑 تریدر: امیرعلی جمشیدزایی\n\n"
         f"💰 موجودی واقعی فیوچرز: `{balance:.2f} تتر (USDT)`\n"
-        f"🚀 حالت خودکار ۲۴ ساعته و رصد اخبار فاندامنتال فعال شد."
+        f"🚀 ربات ۲۴ ساعته فعال شد."
     )
   else:
-    msg = "⚠️ ربات روشن شد اما در اتصال به صرافی XT خطا رخ داد. لطفاً کلیدها را بررسی کنید."
+    msg = "⚠️ ربات روشن شد اما در اتصال به صرافی XT خطا رخ داد. کلیدها را چک کنید."
   
   try:
     bot.send_message(ADMIN_ID, msg, parse_mode="Markdown")
@@ -125,9 +118,8 @@ def send_startup_notification():
     print(f"Startup Notification Error: {e}")
 
 def automated_trading_worker():
-  """حلقه ۲۴ ساعته ترید و دستیابی به هدف ۳۰ سیگنال در روز"""
-  while Time.sleep(2880) is None: # هر ۴۸ دقیقه یک پوزیشن اتوماتیک
-
+  while True:
+    time.sleep(2880) # بررسی هر ۴۸ دقیقه برای هدف ۳۰ سیگنال در روز
     is_connected, live_bal = check_real_connection_and_balance()
     if not is_connected or live_bal < 1.0:
       continue
@@ -172,11 +164,11 @@ def automated_trading_worker():
           if order_response and order_response.get("rc") == 0:
             side_fa = "خرید (Long 🟢)" if side == "BUY" else "فروش (Short 🔴)"
             report_msg = (
-                f"🚨🦁 **گزارش معامله خودکار و خبری صرافی XT**\n"
+                f"🚨🦁 **گزارش معامله خودکار صرافی XT**\n"
                 f"👑 تریدر: امیرعلی جمشیدزایی\n\n"
                 f"📊 جفت ارز: `BTC/USDT`\n"
                 f"⚡️ جهت: {side_fa} | اهرم: {leverage}x\n"
-                f"📰 تحلیل ترکیبی: {combined_reason}\n"
+                f"📰 تحلیل: {combined_reason}\n"
                 f"🎯 قیمت ورود: {current_price}\n"
                 f"💰 مارجین درگیر: {capital_to_use:.2f} تتر"
             )
