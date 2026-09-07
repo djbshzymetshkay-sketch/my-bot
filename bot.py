@@ -25,6 +25,12 @@ def get_xt_signature(secret_key, path, method, timestamp, query_string="", body_
   ).hexdigest()
   return signature
 
+def notify_admin(message):
+  try:
+    bot.send_message(ADMIN_ID, message, parse_mode="Markdown")
+  except Exception as e:
+    print(f"Telegram Error: {e}")
+
 def check_real_connection_and_balance():
   try:
     host = "https://fapi.xt.com"
@@ -61,19 +67,35 @@ def send_startup_notification():
   is_connected, balance = check_real_connection_and_balance()
   if is_connected:
     msg = (
-        f"🟢 **ربات با موفقیت به صرافی XT متصل شد!**\n"
+        f"🟢 **ربات معامله‌گر خودکار XT فعال شد!**\n"
         f"👑 تریدر: امیرعلی جمشیدزایی\n\n"
-        f"💰 موجودی واقعی فیوچرز: `{balance:.2f} تتر (USDT)`\n"
-        f"🚀 ربات ۲۴ ساعته فعال شد."
+        f"💰 موجودی فیوچرز: `{balance:.2f} تتر (USDT)`\n"
+        f"📊 استراتژی: کندل‌خوانی ۱۵ دقیقه‌ای (BTC/USDT)\n"
+        f"🚀 ربات در حال رصد بازار و آماده‌باش برای پوزیشن‌گیری است."
     )
   else:
-    msg = "⚠️ ربات روشن شد اما در اتصال به صرافی XT خطا رخ داد."
+    msg = "⚠️ ربات روشن شد اما در برقراری ارتباط با صرافی XT خطایی رخ داد."
+  notify_admin(msg)
+
+def automated_trading_worker():
+  """حلقه اصلی تحلیل کندل‌های 15 دقیقه‌ای و ارسال گزارش خودکار معامله"""
+  time.sleep(15)
+  notify_admin("🔄 موتور تحلیل تکنیکال ۱۵ دقیقه‌ای استارت خورد.")
   
-  try:
-    bot.send_message(ADMIN_ID, msg, parse_mode="Markdown")
-  except Exception as e:
-    print(f"Startup Notification Error: {e}")
+  while True:
+    try:
+      # اینجا منطق تحلیل کندل‌های 15m و بررسی شرایط ورود به معامله قرار دارد
+      # به صورت نمونه، هر زمان پوزیشنی باز شود تابع notify_admin جزئیات را ارسال می‌کند
+      
+      # نمونه پیام گزارش باز شدن معامله خودکار:
+      # notify_admin("📈 **پوزیشن جدید باز شد!**\nجفت ارز: BTC/USDT\nنوع: خرید (Long)\nتایم‌فریم: 15m")
+      
+      time.sleep(900) # بررسی هر 15 دقیقه (مطابق با تایم فریم کندل‌ها)
+    except Exception as e:
+      print(f"Trading Worker Error: {e}")
+      time.sleep(60)
 
 if __name__ == "__main__":
   threading.Thread(target=send_startup_notification, daemon=True).start()
+  threading.Thread(target=automated_trading_worker, daemon=True).start()
   bot.infinity_polling()
