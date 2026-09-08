@@ -53,11 +53,15 @@ def advanced_smart_market_analysis():
       candles = data["result"]
       closes = [float(c["c"]) for c in candles]
       opens = [float(c["o"]) for c in candles]
+      highs = [float(c["h"]) for c in candles]
+      lows = [float(c["l"]) for c in candles]
+      volumes = [float(c.get("v", 0)) for c in candles]
       current_price = closes[-1]
 
       prev_close = closes[-2]
       prev_open = opens[-2]
 
+      # استراتژی پیشرفته و سخت‌گیرانه (تلاقی چند اندیکاتور و حجم)
       is_bullish_engulfing = (
           (prev_close < prev_open)
           and (closes[-1] > opens[-1])
@@ -74,6 +78,11 @@ def advanced_smart_market_analysis():
       sma_short = sum(closes[-5:]) / 5
       sma_long = sum(closes[-15:]) / 15
 
+      # بررسی حجم معاملات برای تأیید اعتبار حرکت (حجم کندل آخر بالاتر از میانگین ۵ کندل قبل)
+      avg_volume = sum(volumes[-6:-1]) / 5 if len(volumes) >= 6 else volumes[-1]
+      is_volume_confirmed = volumes[-1] > (avg_volume * 1.1)
+
+      # حافظه تطبیقی برای جلوگیری از ضرر تکراری
       recent_failures = [
           t for t in daily_stats["trades_history"][-4:] if not t["success"]
       ]
@@ -81,43 +90,55 @@ def advanced_smart_market_analysis():
       if len(recent_failures) >= 2:
         avoid_direction = recent_failures[-1]["direction"]
 
+      # شرایط ورود بسیار محتاطانه (درصد اطمینان بالا)
       if (
-          is_bullish_engulfing
-          or (sma_short > sma_long and closes[-1] > opens[-1])
-      ) and avoid_direction != "BUY":
+          sma_short > sma_long
+          and is_bullish_engulfing
+          and is_volume_confirmed
+          and avoid_direction != "BUY"
+      ):
         return {
             "status": "success",
-            "trend": "صعودی معتبر (Bullish)",
+            "trend": "صعودی فوق‌العاده قوی (تایید حجم و روند)",
             "action": "BUY",
             "price": current_price,
-            "reason": "تشخیص الگوی کندل پترن صعودی و میانگین متحرک",
-            "tp": round(current_price * 1.015, 2),
-            "sl": round(current_price * 0.994, 2),
+            "reason": (
+                "تلاقی میانگین متحرک صعودی، اینگالفینگ پرقدرت و جهش حجم معاملات"
+            ),
+            "tp": round(current_price * 1.018, 2),
+            "sl": round(current_price * 0.992, 2),
         }
       elif (
-          is_bearish_engulfing
-          or (sma_short < sma_long and closes[-1] < opens[-1])
-      ) and avoid_direction != "SELL":
+          sma_short < sma_long
+          and is_bearish_engulfing
+          and is_volume_confirmed
+          and avoid_direction != "SELL"
+      ):
         return {
             "status": "success",
-            "trend": "نزولی معتبر (Bearish)",
+            "trend": "نزولی فوق‌العاده قوی (تایید حجم و فشار فروش)",
             "action": "SELL",
             "price": current_price,
-            "reason": "تشخیص الگوی کندل پترن نزولی و فشار فروش",
-            "tp": round(current_price * 0.985, 2),
-            "sl": round(current_price * 1.006, 2),
+            "reason": (
+                "تلاقی میانگین متحرک نزولی، اینگالفینگ نزولی و حجم بالای فروش"
+            ),
+            "tp": round(current_price * 0.982, 2),
+            "sl": round(current_price * 1.008, 2),
         }
       else:
         return {
             "status": "neutral",
-            "message": "بازار در حال تثبیت؛ منتظر الگوی قطعی کندل.",
+            "message": (
+                "بازار فاقد شرایط صددرصدی مطمئن؛ ربات هوشمندانه منتظر سیگنال"
+                " کم‌ریسک می‌ماند."
+            ),
         }
     return {
         "status": "error",
         "message": f"خطای کندل: {response.status_code}",
     }
   except Exception as e:
-    return {"status": "error", "message": f"خطای تحلیل کندل: {str(e)}"}
+    return {"status": "error", "message": f"خطای تحلیل پیشرفته: {str(e)}"}
 
 
 def execute_auto_trade(chat_id):
@@ -168,7 +189,7 @@ def execute_auto_trade(chat_id):
 
           if chat_id:
             msg = (
-                "معامله هوشمند مبتنی بر کندل پترن ثبت شد!\n\n"
+                "سیگنال با دقت بالا اجرا شد!\n\n"
                 f"روند: {trend}\nجهت: {action}\nقیمت ورود: {price}\n"
                 f"تحلیل تکنیکال: {reason}\nحد سود (TP): {tp}\nحد ضرر (SL):"
                 f" {sl}"
@@ -179,7 +200,9 @@ def execute_auto_trade(chat_id):
           daily_stats["consecutive_losses"] += 1
           if chat_id:
             bot.send_message(
-                chat_id, f"خطای صرافی (ثبت در حافظه تطبیقی):\n{order_error}"
+                chat_id,
+                f"خطای صرافی در ثبت پوزیشن پرریسک (ثبت در حافظه تطبیقی):\n"
+                f"{order_error}",
             )
 
       time.sleep(900)
@@ -196,11 +219,11 @@ def nightly_report_scheduler(chat_id):
     if now.hour == 21 and now.minute == 0:
       if chat_id:
         report = (
-            "گزارش عملکرد ۲۴ ساعته ربات\n\n"
-            f"کل سیگنال‌های باکیفیت: {daily_stats['signals_opened']}\n"
-            f"معاملات موفق: {daily_stats['successful_trades']}\n"
-            f"خطاها/ناموفق: {daily_stats['failed_trades']}\n"
-            "وضعیت یادگیری از الگوها: فعال و به‌روز"
+            "گزارش عملکرد ۲۴ ساعته ربات (فیلتر سخت‌گیرانه)\n\n"
+            f"سیگنال‌های باکیفیت صید شده: {daily_stats['signals_opened']}\n"
+            f"موفق: {daily_stats['successful_trades']}\n"
+            f"خطاها: {daily_stats['failed_trades']}\n"
+            "وضعیت هوش مصنوعی: فعال و کاملاً محافظه‌کار"
         )
         bot.send_message(chat_id, report)
       time.sleep(3600)
@@ -220,7 +243,10 @@ def send_welcome(message):
 
   success, conn_msg = test_xt_connection()
   if success:
-    intro_msg = f"ربات هوشمند کندل‌خوان با پکیج رسمی روشن شد!\n\n{conn_msg}"
+    intro_msg = (
+        "ربات هوشمند با استراتژی سخت‌گیرانه و تایید حجم معاملات روشن شد!\n\n"
+        f"{conn_msg}"
+    )
   else:
     intro_msg = f"اتصال صرافی نیازمند بررسی کلیدهاست:\n{conn_msg}"
 
@@ -245,7 +271,7 @@ def handle_messages(message):
     if res["status"] == "success":
       bot.send_message(
           message.chat.id,
-          f"تحلیل کندل‌پترن بازار:\nروند: {res['trend']}\nپیشنهاد:"
+          f"وضعیت کلیدی بازار:\nروند: {res['trend']}\nپیشنهاد:"
           f" {res['action']}\nدلیل: {res['reason']}\nقیمت: {res['price']}",
       )
     else:
@@ -255,8 +281,8 @@ def handle_messages(message):
       )
   elif message.text == "آمار معاملات امروز":
     stats_msg = (
-        "آمار عملکرد و یادگیری:\n\n"
-        f"مجموع معاملات: {daily_stats['signals_opened']}\n"
+        "آمار عملکرد محافظه‌کارانه:\n\n"
+        f"مجموع معاملات تاییدشده: {daily_stats['signals_opened']}\n"
         f"موفق: {daily_stats['successful_trades']} | خطا:"
         f" {daily_stats['failed_trades']}"
     )
