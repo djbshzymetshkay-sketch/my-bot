@@ -155,11 +155,6 @@ def execute_auto_trade(chat_id):
         applied_leverage = 50
 
         try:
-          # تنظیم اتوماتیک اهرم توسط ربات
-          xt_perp.submit_leverage(
-              symbol="btc_usdt", leverage=applied_leverage, positionSide=position_side
-          )
-
           # خواندن اتوماتیک موجودی حساب برای محاسبه حجم
           account_data = xt_perp.get_account_capital()
           available_balance = 10.0
@@ -183,6 +178,7 @@ def execute_auto_trade(chat_id):
               positionSide=position_side,
               side=side,
               vol=volume,
+              leverage=str(applied_leverage),
           )
           success_order = True
           order_error = ""
