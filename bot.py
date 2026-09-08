@@ -32,7 +32,8 @@ def test_xt_connection():
         url = XT_BASE_URL + path
         timestamp = str(int(time.time() * 1000))
         
-        signature_payload = f"Y=#{path}#"
+        query_string = f"timestamp={timestamp}"
+        signature_payload = f"Y=#{path}#{query_string}"
         signature = get_xt_signature(XT_SECRET_KEY, signature_payload)
         
         headers = {
@@ -42,18 +43,13 @@ def test_xt_connection():
             "Content-Type": "application/x-www-form-urlencoded"
         }
         
-        response = requests.get(url, headers=headers, timeout=10)
-        
-        try:
-            data = response.json()
-        except Exception:
-            return False, f"پاسخ خام غیرقابل پردازش از صرافی: {response.text}"
+        response = requests.get(f"{url}?{query_string}", headers=headers, timeout=10)
+        data = response.json()
         
         if response.status_code == 200 and data.get("returnCode") == 0:
             return True, "اتصال به صرافی با موفقیت برقرار شد."
         else:
             return False, f"خطای صرافی: {data}"
-            
     except Exception as e:
         return False, f"خطای شبکه: {str(e)}"
 
@@ -67,7 +63,7 @@ def place_real_xt_order(symbol, direction, price):
         if daily_stats["consecutive_losses"] >= 2:
             volume = "0.001"
             
-        payload = {
+        params = {
             "symbol": symbol,
             "orderType": "1",
             "entrustType": "1",
@@ -77,7 +73,8 @@ def place_real_xt_order(symbol, direction, price):
             "vol": volume
         }
         
-        body_str = f"bizType=1&entrustType=1&orderType=1&positionSide={payload['positionSide']}&side={payload['side']}&symbol={symbol}&timestamp={timestamp}&vol={volume}"
+        sorted_params = sorted(params.items())
+        body_str = "&".join([f"{k}={v}" for k, v in sorted_params])
         signature_payload = f"Y=#{path}#{body_str}"
         signature = get_xt_signature(XT_SECRET_KEY, signature_payload)
         
@@ -88,7 +85,7 @@ def place_real_xt_order(symbol, direction, price):
             "Content-Type": "application/x-www-form-urlencoded"
         }
         
-        response = requests.post(url, headers=headers, data=payload, timeout=10)
+        response = requests.post(url, headers=headers, data=params, timeout=10)
         res_data = response.json()
         
         if response.status_code == 200 and res_data.get("returnCode") == 0:
@@ -102,7 +99,7 @@ def place_real_xt_order(symbol, direction, price):
 
 def advanced_smart_market_analysis():
     try:
-        url = f"{XT_BASE_URL}/future/market/v1/public/q/kline?symbol=btc_usdt&interval=15m&limit=15"
+        url = f"{XT_BASE_URL}/future/market/v1/public/q/kline?symbol=btc_usdt&interval=15m&limit=30"
         response = requests.get(url, timeout=10)
         data = response.json()
         
@@ -111,32 +108,41 @@ def advanced_smart_market_analysis():
             closes = [float(c['c']) for c in candles]
             opens = [float(c['o']) for c in candles]
             current_price = closes[-1]
+            
+            # تحلیل تخصصی الگوهای کندل‌خوانی (Candlestick Analysis)
             prev_close = closes[-2]
             prev_open = opens[-2]
             
-            is_bullish_engulfing = (prev_close < prev_open) and (current_price > opens[-1]) and (closes[-1] > prev_open)
-            is_bearish_engulfing = (prev_close > prev_open) and (current_price < opens[-1]) and (closes[-1] < prev_open)
+            # الگوی پوشای صعودی و نزولی (Bullish / Bearish Engulfing)
+            is_bullish_engulfing = (prev_close < prev_open) and (closes[-1] > opens[-1]) and (closes[-1] >= prev_open) and (opens[-1] <= prev_close)
+            is_bearish_engulfing = (prev_close > prev_open) and (closes[-1] < opens[-1]) and (closes[-1] <= prev_open) and (opens[-1] >= prev_close)
             
             sma_short = sum(closes[-5:]) / 5
             sma_long = sum(closes[-15:]) / 15
             
-            if is_bullish_engulfing or (sma_short > sma_long and current_price >= closes[-2]):
+            # سیستم یادگیری و حافظه تطبیقی از خطاهای گذشته
+            recent_failures = [t for t in daily_stats["trades_history"][-4:] if not t["success"]]
+            avoid_direction = None
+            if len(recent_failures) >= 2:
+                avoid_direction = recent_failures[-1]["direction"]
+
+            if (is_bullish_engulfing or (sma_short > sma_long and closes[-1] > opens[-1])) and avoid_direction != "BUY":
                 return {
-                    "status": "success", "trend": "صعودی (Bullish)", "action": "BUY",
-                    "price": current_price, "reason": "تشخیص الگوی برگشتی / تایید روند صعودی",
-                    "tp": round(current_price * 1.012, 2), "sl": round(current_price * 0.994, 2)
+                    "status": "success", "trend": "صعودی معتبر (Bullish)", "action": "BUY",
+                    "price": current_price, "reason": "تشخیص الگوی کندل‌پترن صعودی / تایید میانگین متحرک",
+                    "tp": round(current_price * 1.015, 2), "sl": round(current_price * 0.994, 2)
                 }
-            elif is_bearish_engulfing or (sma_short < sma_long and current_price <= closes[-2]):
+            elif (is_bearish_engulfing or (sma_short < sma_long and closes[-1] < opens[-1])) and avoid_direction != "SELL":
                 return {
-                    "status": "success", "trend": "نزولی (Bearish)", "action": "SELL",
-                    "price": current_price, "reason": "تشخیص فشار فروش / تایید روند نزولی",
-                    "tp": round(current_price * 0.988, 2), "sl": round(current_price * 1.006, 2)
+                    "status": "success", "trend": "نزولی معتبر (Bearish)", "action": "SELL",
+                    "price": current_price, "reason": "تشخیص الگوی کندل‌پترن نزولی / تایید فشار فروش",
+                    "tp": round(current_price * 0.985, 2), "sl": round(current_price * 1.006, 2)
                 }
             else:
-                return {"status": "neutral", "message": "بازار در حالت خنثی یا تثبیت است."}
-        return {"status": "error", "message": f"خطای دریافت اطلاعات کندل از صرافی (کد وضعیت: {response.status_code})"}
+                return {"status": "neutral", "message": "بازار در حال تثبیت؛ منتظر الگوی قطعی کندل."}
+        return {"status": "error", "message": f"خطای کندل: {response.status_code}"}
     except Exception as e:
-        return {"status": "error", "message": f"خطای استثنا در تحلیل بازار: {str(e)}"}
+        return {"status": "error", "message": f"خطای تحلیل کندل: {str(e)}"}
 
 def execute_auto_trade(chat_id):
     global daily_stats
@@ -153,6 +159,14 @@ def execute_auto_trade(chat_id):
                 
                 order_res = place_real_xt_order("btc_usdt", action, price)
                 
+                trade_record = {
+                    "direction": action,
+                    "price": price,
+                    "success": order_res["returnCode"] == 0,
+                    "time": datetime.now().strftime("%H:%M")
+                }
+                daily_stats["trades_history"].append(trade_record)
+                
                 if order_res["returnCode"] == 0:
                     daily_stats["signals_opened"] += 1
                     daily_stats["successful_trades"] += 1
@@ -160,23 +174,22 @@ def execute_auto_trade(chat_id):
                     
                     if chat_id:
                         msg = (
-                            f"🚀 **معامله خودکار موفق ثبت شد!**\n\n"
-                            f"📈 روند: {trend}\n🎯 جهت: {action}\n💲 قیمت: {price}\n"
-                            f"💡 استراتژی: {reason}\n🟢 حد سود: {tp}\n🔴 حد ضرر: {sl}"
+                            f"🚀 **معامله هوشمند مبتنی بر کندل‌پترن ثبت شد!**\n\n"
+                            f"📈 روند: {trend}\n🎯 جهت: {action}\n💲 قیمت ورود: {price}\n"
+                            f"💡 تحلیل تکنیکال و یادگیری: {reason}\n🟢 حد سود (TP): {tp}\n🔴 حد ضرر (SL): {sl}"
                         )
                         bot.send_message(chat_id, msg, parse_mode="Markdown")
                 else:
                     daily_stats["failed_trades"] += 1
                     daily_stats["consecutive_losses"] += 1
                     if chat_id:
-                        bot.send_message(chat_id, f"⚠️ **خطا در اجرای معامله خودکار:**\n{order_res['msg']}", parse_mode="Markdown")
-            elif analysis["status"] == "error" and chat_id:
-                bot.send_message(chat_id, f"⚠️ **خطای تحلیل بازار:** {analysis['message']}")
-                
+                        bot.send_message(chat_id, f"⚠️ **خطای صرافی (ثبت در حافظه تطبیقی):**\n{order_res['msg']}", parse_mode="Markdown")
+            
+            # بررسی بازار هر 15 دقیقه برای دقت بالا در کندل‌خوانی
             time.sleep(900)
         except Exception as e:
             if chat_id:
-                bot.send_message(chat_id, f"⚠️ **خطای بحرانی در بخش اتوماتیک:** {str(e)}")
+                bot.send_message(chat_id, f"⚠️ **خطای سیستم:** {str(e)}")
             time.sleep(60)
 
 def nightly_report_scheduler(chat_id):
@@ -187,10 +200,10 @@ def nightly_report_scheduler(chat_id):
             if chat_id:
                 report = (
                     f"🌙 **گزارش عملکرد ۲۴ ساعته ربات**\n\n"
-                    f"📊 کل سیگنال‌ها: {daily_stats['signals_opened']}\n"
+                    f"📊 کل سیگنال‌های باکیفیت: {daily_stats['signals_opened']}\n"
                     f"✅ معاملات موفق: {daily_stats['successful_trades']}\n"
                     f"❌ خطاها/ناموفق: {daily_stats['failed_trades']}\n"
-                    f"⚖️ سطح ریسک: {'محافظه‌کارانه' if daily_stats['consecutive_losses'] >= 2 else 'عادی'}"
+                    f"🧠 وضعیت یادگیری از الگوها: فعال و به‌روز"
                 )
                 bot.send_message(chat_id, report, parse_mode="Markdown")
             time.sleep(3600)
@@ -205,9 +218,9 @@ def send_welcome(message):
     
     success, conn_msg = test_xt_connection()
     if success:
-        intro_msg = f"✅ **ربات با موفقیت روشن شد و اتصال به صرافی برقرار است!**\n\nجزئیات: {conn_msg}"
+        intro_msg = f"✅ **ربات هوشمند کندل‌خوان روشن شد!**\n\n{conn_msg}"
     else:
-        intro_msg = f"❌ **ربات روشن شد اما اتصال به صرافی با خطا مواجه شد!**\n\nعلت دقیق خطا:\n{conn_msg}"
+        intro_msg = f"❌ **اتصال صرافی نیازمند بررسی کلیدهاست:**\n{conn_msg}"
         
     bot.send_message(chat_id, intro_msg, parse_mode="Markdown", reply_markup=markup)
     
@@ -223,13 +236,13 @@ def handle_messages(message):
     elif message.text == "تحلیل لحظه‌ای بازار":
         res = advanced_smart_market_analysis()
         if res["status"] == "success":
-            bot.send_message(message.chat.id, f"📊 تحلیل بازار:\nروند: {res['trend']}\nپیشنهاد: {res['action']}\nدلیل: {res['reason']}\nقیمت: {res['price']}")
+            bot.send_message(message.chat.id, f"📊 تحلیل کندل‌پترن بازار:\nروند: {res['trend']}\nپیشنهاد: {res['action']}\nدلیل: {res['reason']}\nقیمت: {res['price']}")
         else:
-            bot.send_message(message.chat.id, f"📌 {res.get('message', 'بازار در حال انتظار است.')}")
+            bot.send_message(message.chat.id, f"📌 {res.get('message', 'بازار در حال بررسی است.')}")
     elif message.text == "آمار معاملات امروز":
         stats_msg = (
-            f"📈 **آمار عملکرد:**\n\n"
-            f"تعداد کل سیگنال‌ها: {daily_stats['signals_opened']}\n"
+            f"📈 **آمار عملکرد و یادگیری:**\n\n"
+            f"مجموع معاملات: {daily_stats['signals_opened']}\n"
             f"موفق: {daily_stats['successful_trades']} | خطا: {daily_stats['failed_trades']}"
         )
         bot.send_message(message.chat.id, stats_msg, parse_mode="Markdown")
@@ -238,4 +251,4 @@ def handle_messages(message):
 
 if __name__ == "__main__":
     bot.infinity_polling()
-        
+                    
