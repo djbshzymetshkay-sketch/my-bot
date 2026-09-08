@@ -53,11 +53,12 @@ def send_xt_request(method, endpoint, params=None):
 
         signature = get_xt_signature(XT_SECRET_KEY, sign_payload)
 
+        # اصلاح هدرها با استاندارد xt-validate برای رفع خطای appKey
         headers = {
-            "validate-appkey": XT_API_KEY,
-            "validate-timestamp": timestamp,
-            "validate-signature": signature,
-            "validate-algorithms": "HmacSHA256",
+            "xt-validate-appkey": XT_API_KEY,
+            "xt-validate-timestamp": timestamp,
+            "xt-validate-signature": signature,
+            "xt-validate-algorithms": "HmacSHA256",
             "Content-Type": "application/json"
         }
 
@@ -116,7 +117,7 @@ def advanced_candlestick_and_market_analysis():
             lower_shadow = min(curr_close, curr_open) - curr_low
 
             is_bullish_engulfing = (prev_close < prev_open) and (curr_close > curr_open) and (curr_close >= prev_open) and (curr_open <= prev_close)
-            is_bearish_engulfing = (prev_close > prev_open) and (curr_close < curr_open) and (curr_close <= prev_open) and (curr_open >= prev_close)
+            is_bearish_engulfing = (prev_close > prev_open) and (curr_close < curr_open) and (curr_close <= prev_open) and (curr_close >= prev_close)
 
             is_hammer = (lower_shadow >= 2 * body) and (upper_shadow <= 0.2 * body)
             is_shooting_star = (upper_shadow >= 2 * body) and (lower_shadow <= 0.2 * body)
@@ -279,4 +280,4 @@ def handle_messages(message):
 
 if __name__ == "__main__":
     bot.infinity_polling()
-    
+            
