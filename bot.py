@@ -8,7 +8,7 @@ import telebot
 from telebot import types
 from datetime import datetime
 
-# --- توکن تلگرام و کلیدهای صرافی ---
+# --- خواندن توکن از ریلی‌وی و کلیدهای صرافی از داخل کد ---
 TELEGRAM_TOKEN = os.getenv("TOKEN")
 XT_API_KEY = "c25d4d1a-b496-4c2a-a8ee-599cee26b975"
 XT_SECRET_KEY = "e8b8bc8b8d3ee498ac71194becd6498ecc2f67bd"
@@ -32,7 +32,6 @@ def test_xt_connection():
         url = XT_BASE_URL + path
         timestamp = str(int(time.time() * 1000))
         
-        # مرتب‌سازی پارامترها برای ساخت امضای دقیق فیوچرز XT
         params_str = f"timestamp={timestamp}"
         signature = get_xt_signature(XT_SECRET_KEY, params_str)
         
@@ -45,14 +44,22 @@ def test_xt_connection():
         }
         
         response = requests.get(url, headers=headers, timeout=10)
-        data = response.json()
         
+        try:
+            data = response.json()
+        except:
+            return False, f"پاسخ خام غیرقابل پردازش از صرافی: {response.text}"
+        
+        # بررسی وضعیت و نمایش دلیل دقیق در صورت بروز خطا
         if response.status_code == 200 and data.get("returnCode") == 0:
-            return True, "ارتباط با صرافی XT برقرار است و حساب آماده معامله است."
+            return True, "اتصال با موفقیت برقرار شد و حساب آماده است."
         else:
-            return False, f"خطا از صرافی XT: {data.get('retMsg', data.get('msg', 'پاسخ نامعتبر'))}"
+            err_code = data.get("returnCode", response.status_code)
+            err_msg = data.get("retMsg") or data.get("msg") or str(data)
+            return False, f"کد خطا: {err_code} | دلیل صرافی: {err_msg}"
+            
     except Exception as e:
-        return False, f"خطای شبکه: {str(e)}"
+        return False, f"خطای ارتباط شبکه: {str(e)}"
 
 def place_real_xt_order(symbol, direction, price):
     try:
@@ -85,9 +92,10 @@ def place_real_xt_order(symbol, direction, price):
         res_data = response.json()
         
         if response.status_code == 200 and res_data.get("returnCode") == 0:
-            return {"returnCode": 0, "msg": "معامله واقعی با موفقیت در صرافی ثبت شد."}
+            return {"returnCode": 0, "msg": "معامله با موفقیت ثبت شد."}
         else:
-            return {"returnCode": -1, "msg": res_data.get("retMsg", "خطای صرافی")}
+            err_msg = res_data.get("retMsg") or res_data.get("msg") or "خطای ناشناخته"
+            return {"returnCode": -1, "msg": err_msg}
     except Exception as e:
         return {"returnCode": -1, "msg": str(e)}
 
@@ -105,25 +113,12 @@ def analyze_market_optimized():
             current_price = close_price
             
             if close_price >= open_price:
-                trend = "صعودی (Bullish)"
-                action = "BUY"
-                reason = "تایید مومنتوم صعودی در کندل ۱۵ دقیقه‌ای."
-                tp = round(current_price * 1.01, 2)
-                sl = round(current_price * 0.995, 2)
+                return {"status": "success", "trend": "صعودی", "action": "BUY", "price": current_price, "tp": round(current_price * 1.01, 2), "sl": round(current_price * 0.995, 2)}
             else:
-                trend = "نزولی (Bearish)"
-                action = "SELL"
-                reason = "فشار فروش در کندل ۱۵ دقیقه‌ای."
-                tp = round(current_price * 0.99, 2)
-                sl = round(current_price * 1.005, 2)
-                
-            return {
-                "status": "success", "trend": trend, "action": action,
-                "price": current_price, "reason": reason, "tp": tp, "sl": sl
-            }
-        return {"status": "error", "message": "داده‌ای دریافت نشد."}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+                return {"status": "success", "trend": "نزولی", "action": "SELL", "price": current_price, "tp": round(current_price * 0.99, 2), "sl": round(current_price * 1.005, 2)}
+        return {"status": "error"}
+    except:
+        return {"status": "error"}
 
 def execute_auto_trade(chat_id):
     global daily_stats
@@ -133,37 +128,15 @@ def execute_auto_trade(chat_id):
             if analysis["status"] == "success":
                 action = analysis["action"]
                 price = analysis["price"]
-                trend = analysis["trend"]
-                reason = analysis["reason"]
-                tp = analysis["tp"]
-                sl = analysis["sl"]
-                
                 order_res = place_real_xt_order("btc_usdt", action, price)
                 daily_stats["signals_opened"] += 1
                 
                 if chat_id:
-                    msg = (
-                        f"🚀 **معامله خودکار جدید باز شد!**\n\n"
-                        f"📈 روند: {trend}\n🎯 جهت: {action}\n💲 ورود: {price}\n"
-                        f"🟢 حد سود: {tp}\n🔴 حد ضرر: {sl}\n📡 صرافی: {order_res['msg']}"
-                    )
+                    msg = f"🚀 معامله خودکار ثبت شد!\nجهت: {action}\nقیمت: {price}\nنتیجه: {order_res['msg']}"
                     bot.send_message(chat_id, msg)
             time.sleep(900)
-        except Exception as e:
-            print(f"Error: {str(e)}")
+        except:
             time.sleep(60)
-
-def nightly_report_scheduler(chat_id):
-    global daily_stats
-    while True:
-        now = datetime.now()
-        if now.hour == 21 and now.minute == 0:
-            if chat_id:
-                report = f"🌙 **گزارش شبانه (ساعت ۲۱:۰۰)**\n\nتعداد کل معاملات امروز: {daily_stats['signals_opened']}"
-                bot.send_message(chat_id, report)
-            time.sleep(3600)
-        else:
-            time.sleep(30)
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -171,9 +144,8 @@ def send_welcome(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(types.KeyboardButton("وضعیت اتصال صرافی"), types.KeyboardButton("تحلیل لحظه‌ای بازار"), types.KeyboardButton("آمار معاملات امروز"))
     
-    bot.send_message(message.chat.id, f"سلام! ربات متصل شد.\n\nوضعیت صرافی: {conn_msg}", reply_markup=markup)
+    bot.send_message(message.chat.id, f"سلام! ربات روشن شد.\n\nوضعیت: {conn_msg}", reply_markup=markup)
     threading.Thread(target=execute_auto_trade, args=(message.chat.id,), daemon=True).start()
-    threading.Thread(target=nightly_report_scheduler, args=(message.chat.id,), daemon=True).start()
 
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
@@ -184,15 +156,14 @@ def handle_messages(message):
     elif message.text == "تحلیل لحظه‌ای بازار":
         res = analyze_market_optimized()
         if res["status"] == "success":
-            bot.send_message(message.chat.id, f"📊 تحلیل (15m):\nروند: {res['trend']}\nسیگنال: {res['action']}\nقیمت: {res['price']}")
+            bot.send_message(message.chat.id, f"📊 روند: {res['trend']} | سیگنال: {res['action']} | قیمت: {res['price']}")
         else:
-            bot.send_message(message.chat.id, "خطا در دریافت تحلیل.")
+            bot.send_message(message.chat.id, "خطا در دریافت تحلیل بازار.")
     elif message.text == "آمار معاملات امروز":
         bot.send_message(message.chat.id, f"📈 آمار امروز: {daily_stats['signals_opened']} معامله")
     else:
         bot.send_message(message.chat.id, "لطفاً از دکمه‌ها استفاده کنید.")
 
 if __name__ == "__main__":
-    print("Bot is running...")
     bot.infinity_polling()
         
