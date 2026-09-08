@@ -1,3 +1,4 @@
 pyxt
 requests
-telebot
+pyTelegramBotAPI
+
