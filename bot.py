@@ -28,7 +28,7 @@ def get_xt_signature(secret_key, message):
 
 def test_xt_connection():
     try:
-        path = "/future/user/v1/account/detail"
+        path = "/future/user/v1/account/describe"
         url = XT_BASE_URL + path
         timestamp = str(int(time.time() * 1000))
         
@@ -50,14 +50,12 @@ def test_xt_connection():
             return False, f"پاسخ خام غیرقابل پردازش از صرافی: {response.text}"
         
         if response.status_code == 200 and data.get("returnCode") == 0:
-            return True, "اتصال به صرافی با موفقیت برقرار شد و حساب فعال است."
+            return True, "اتصال به صرافی با موفقیت برقرار شد."
         else:
-            err_code = data.get("returnCode", response.status_code)
-            err_msg = data.get("retMsg") or data.get("msg") or str(data)
-            return False, f"کد خطای صرافی: {err_code} | دلیل: {err_msg}"
+            return False, f"خطای صرافی: {data}"
             
     except Exception as e:
-        return False, f"خطای ارتباط شبکه یا تایم‌اوت: {str(e)}"
+        return False, f"خطای شبکه: {str(e)}"
 
 def place_real_xt_order(symbol, direction, price):
     try:
@@ -104,14 +102,14 @@ def place_real_xt_order(symbol, direction, price):
 
 def advanced_smart_market_analysis():
     try:
-        url = f"{XT_BASE_URL}/future/market/v1/public/contract/kline?symbol=btc_usdt&interval=15m&limit=15"
+        url = f"{XT_BASE_URL}/future/market/v1/public/q/kline?symbol=btc_usdt&interval=15m&limit=15"
         response = requests.get(url, timeout=10)
         data = response.json()
         
         if response.status_code == 200 and "result" in data:
             candles = data["result"]
-            closes = [float(c[4]) for c in candles]
-            opens = [float(c[1]) for c in candles]
+            closes = [float(c['c']) for c in candles]
+            opens = [float(c['o']) for c in candles]
             current_price = closes[-1]
             prev_close = closes[-2]
             prev_open = opens[-2]
@@ -205,7 +203,6 @@ def send_welcome(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(types.KeyboardButton("وضعیت اتصال صرافی"), types.KeyboardButton("تحلیل لحظه‌ای بازار"), types.KeyboardButton("آمار معاملات امروز"))
     
-    # تست اتصال در لحظه استارت و ارسال خودکار نتیجه به کاربر
     success, conn_msg = test_xt_connection()
     if success:
         intro_msg = f"✅ **ربات با موفقیت روشن شد و اتصال به صرافی برقرار است!**\n\nجزئیات: {conn_msg}"
@@ -241,4 +238,4 @@ def handle_messages(message):
 
 if __name__ == "__main__":
     bot.infinity_polling()
-    
+        
