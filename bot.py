@@ -243,4 +243,3 @@ if __name__ == "__main__":
   threading.Thread(target=daily_report_worker, daemon=True).start()
   threading.Thread(target=automated_trading_worker, daemon=True).start()
   bot.infinity_polling()
-  
