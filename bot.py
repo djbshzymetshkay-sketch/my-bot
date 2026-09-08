@@ -34,7 +34,7 @@ def get_xt_signature(secret_key, message):
 def send_xt_request(method, endpoint, params=None):
     try:
         timestamp = str(int(time.time() * 1000))
-        path = f"/future/user/v1{endpoint}" if any(x in endpoint for x in ["account", "position", "order"]) else f"/future/market/v1{endpoint}"
+        path = f"/future/user/v1{endpoint}" if any(x in endpoint for x in ["account", "position", "order", "balance"]) else f"/future/market/v1{endpoint}"
 
         query_string = ""
         body_string = ""
@@ -54,10 +54,10 @@ def send_xt_request(method, endpoint, params=None):
         signature = get_xt_signature(XT_SECRET_KEY, sign_payload)
 
         headers = {
-            "xt-validate-appkey": XT_API_KEY,
-            "xt-validate-timestamp": timestamp,
-            "xt-validate-signature": signature,
-            "xt-validate-algorithms": "HmacSHA256",
+            "validate-appkey": XT_API_KEY,
+            "validate-timestamp": timestamp,
+            "validate-signature": signature,
+            "validate-algorithms": "HmacSHA256",
             "Content-Type": "application/json"
         }
 
@@ -72,12 +72,17 @@ def send_xt_request(method, endpoint, params=None):
         return 500, {"msgInfo": str(e)}
 
 def test_xt_connection():
-    status_code, res = send_xt_request("GET", "/account/balance")
-    return f"Status: {status_code}\nResponse: {res}"
+    status_code, res = send_xt_request("GET", "/balance/list")
+    if status_code == 200 and (res.get("returnCode") == 0 or res.get("code") == 0 or "result" in res):
+        return True, "اتصال به حساب فیوچرز صرافی با موفقیت برقرار شد."
+    return False, f"خطای اتصال صرافی (کد {status_code}): {res}"
 
 def get_account_balance_details():
-    status_code, res = send_xt_request("GET", "/account/balance")
-    return f"📊 پاسخ صرافی (کد {status_code}):\n\n{json.dumps(res, indent=2, ensure_ascii=False)}"
+    status_code, res = send_xt_request("GET", "/balance/list")
+    if status_code == 200:
+        result_data = res.get("result", res)
+        return f"📊 وضعیت کیف پول فیوچرز صرافی XT:\n\n{json.dumps(result_data, indent=2, ensure_ascii=False)}"
+    return f"خطا در دریافت موجودی:\n{res}"
 
 def advanced_candlestick_and_market_analysis():
     try:
@@ -106,7 +111,7 @@ def advanced_candlestick_and_market_analysis():
             upper_shadow = curr_high - max(curr_close, curr_open)
             lower_shadow = min(curr_close, curr_open) - curr_low
 
-            is_bullish_engulfing = (prev_close < prev_open) and (curr_close > curr_open) and (curr_close >= prev_open) and (curr_open <= prev_close)
+            is_bullish_engulfing = (prev_close < prev_open) and (curr_close > curr_open) and (curr_close >= prev_open) and (curr_close <= prev_close)
             is_bearish_engulfing = (prev_close > prev_open) and (curr_close < curr_open) and (curr_close <= prev_open) and (curr_close >= prev_close)
 
             is_hammer = (lower_shadow >= 2 * body) and (upper_shadow <= 0.2 * body)
@@ -118,24 +123,31 @@ def advanced_candlestick_and_market_analysis():
             avg_volume = sum(volumes[-6:-1]) / 5 if len(volumes) >= 6 else volumes[-1]
             is_volume_confirmed = volumes[-1] > (avg_volume * 1.1)
 
+            # شرط سخت‌گیرانه برای اطمینان بالا از سودآوری
             if sma_short > sma_long and (is_bullish_engulfing or is_hammer) and is_volume_confirmed:
+                pattern_name = "اینگالفینگ صعودی / چکش معتبر" if is_bullish_engulfing else "چکش صعودی"
                 return {
                     "status": "success",
-                    "trend": "صعودی قوی",
+                    "trend": "صعودی قوی (تأییدیه میانگین متحرک و حجم)",
                     "action": "BUY",
                     "price": current_price,
-                    "pattern": "اینگالفینگ صعودی / چکش"
+                    "pattern": pattern_name,
+                    "tp": round(current_price * 1.018, 2), # حد سود ۱.۸٪
+                    "sl": round(current_price * 0.992, 2)  # حد ضرر ۰.۸٪
                 }
             elif sma_short < sma_long and (is_bearish_engulfing or is_shooting_star) and is_volume_confirmed:
+                pattern_name = "اینگالفینگ نزولی / ستاره دنباله‌دار معتبر" if is_bearish_engulfing else "ستاره دنباله‌دار"
                 return {
                     "status": "success",
-                    "trend": "نزولی قوی",
+                    "trend": "نزولی قوی (تأییدیه میانگین متحرک و حجم)",
                     "action": "SELL",
                     "price": current_price,
-                    "pattern": "اینگالفینگ نزولی / ستاره دنباله‌دار"
+                    "pattern": pattern_name,
+                    "tp": round(current_price * 0.982, 2),
+                    "sl": round(current_price * 1.008, 2)
                 }
             else:
-                return {"status": "neutral", "message": "بازار در حال نوسان عادی؛ ربات منتظر کندل مطمئن."}
+                return {"status": "neutral", "message": "بازار مبهم است؛ ربات منتظر شرایط کاملاً مطمئن می‌ماند."}
         return {"status": "error", "message": "خطای دریافت کندل"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -148,7 +160,10 @@ def execute_auto_trade(chat_id):
             if analysis.get("status") == "success":
                 action = analysis["action"]
                 price = analysis["price"]
+                trend = analysis["trend"]
                 pattern = analysis["pattern"]
+                tp = analysis["tp"]
+                sl = analysis["sl"]
 
                 position_side = "1" if action == "BUY" else "2"
                 side = "1" if action == "BUY" else "2"
@@ -160,11 +175,14 @@ def execute_auto_trade(chat_id):
                     "positionSide": position_side
                 })
                 
-                status_code, bal_res = send_xt_request("GET", "/account/balance")
+                status_code, bal_res = send_xt_request("GET", "/balance/list")
                 available_balance = 10.0
                 try:
                     res_data = bal_res.get("result", bal_res)
-                    available_balance = float(res_data.get("availableBalance") or res_data.get("accountAvailableBalance") or 10.0)
+                    if isinstance(res_data, list) and len(res_data) > 0:
+                        available_balance = float(res_data[0].get("availableBalance", 10.0))
+                    elif isinstance(res_data, dict):
+                        available_balance = float(res_data.get("availableBalance", 10.0))
                 except:
                     pass
 
@@ -184,16 +202,45 @@ def execute_auto_trade(chat_id):
                 if status_code == 200 and (res_order.get("returnCode") == 0 or res_order.get("code") == 0):
                     daily_stats["signals_opened"] += 1
                     daily_stats["successful_trades"] += 1
+                    daily_stats["trades_history"].append({"direction": action, "success": True})
                     if chat_id:
-                        bot.send_message(chat_id, f"🚨 معامله اتوماتیک ثبت شد!\nجهت: {action}\nقیمت: {price}")
+                        bot.send_message(
+                            chat_id, 
+                            f"🚨 معامله اتوماتیک با اطمینان بالا باز شد!\n\n"
+                            f"📌 جهت: {action}\n"
+                            f"🕯 الگو و دلیل: {pattern}\n"
+                            f"📈 روند بازار: {trend}\n"
+                            f"💵 قیمت ورود: {price}\n"
+                            f"🎯 حد سود (TP): {tp}\n"
+                            f"🛡 حد ضرر (SL): {sl}\n"
+                            f"⚡️ اهرم: {applied_leverage}x"
+                        )
                 else:
                     daily_stats["failed_trades"] += 1
+                    daily_stats["trades_history"].append({"direction": action, "success": False})
                     if chat_id:
-                        bot.send_message(chat_id, f"خطای ثبت سفارش:\n{res_order}")
+                        bot.send_message(chat_id, f"خطای ثبت سفارش در صرافی:\n{res_order}")
 
             time.sleep(900)
         except Exception as e:
             time.sleep(60)
+
+def nightly_report_scheduler(chat_id):
+    global daily_stats
+    while True:
+        now = datetime.now()
+        if now.hour == 21 and now.minute == 0:
+            if chat_id:
+                bot.send_message(
+                    chat_id, 
+                    f"📅 گزارش عملکرد ۲۴ ساعته ربات (ساعت ۲۱):\n\n"
+                    f"🔹 کل سیگنال‌های اجرا شده: {daily_stats['signals_opened']}\n"
+                    f"✅ معاملات موفق: {daily_stats['successful_trades']}\n"
+                    f"❌ خطاها: {daily_stats['failed_trades']}"
+                )
+            time.sleep(3600)
+        else:
+            time.sleep(30)
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -205,21 +252,26 @@ def send_welcome(message):
         types.KeyboardButton("تحلیل لحظه‌ای بازار"),
         types.KeyboardButton("آمار معاملات امروز")
     )
-    conn_msg = test_xt_connection()
-    bot.send_message(chat_id, f"ربات تست اتصال روشن شد!\n\n{conn_msg}", reply_markup=markup)
+    success, conn_msg = test_xt_connection()
+    bot.send_message(chat_id, f"ربات هوشمند با استراتژی دقیق فعال شد!\n\n{conn_msg}", reply_markup=markup)
     threading.Thread(target=execute_auto_trade, args=(chat_id,), daemon=True).start()
+    threading.Thread(target=nightly_report_scheduler, args=(chat_id,), daemon=True).start()
 
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
     global daily_stats
     if message.text == "وضعیت اتصال صرافی":
-        bot.send_message(message.chat.id, test_xt_connection())
+        _, msg = test_xt_connection()
+        bot.send_message(message.chat.id, msg)
     elif message.text == "موجودی حساب":
         bot.send_message(message.chat.id, get_account_balance_details())
     elif message.text == "تحلیل لحظه‌ای بازار":
         res = advanced_candlestick_and_market_analysis()
         if res.get("status") == "success":
-            bot.send_message(message.chat.id, f"وضعیت بازار:\nکندل: {res['pattern']}\nروند: {res['trend']}\nپیشنهاد: {res['action']}\nقیمت: {res['price']}")
+            bot.send_message(
+                message.chat.id, 
+                f"وضعیت فعلی بازار:\nکندل: {res['pattern']}\nروند: {res['trend']}\nپیشنهاد: {res['action']}\nقیمت: {res['price']}\nحد سود: {res['tp']}\nحد ضرر: {res['sl']}"
+            )
         else:
             bot.send_message(message.chat.id, res.get("message", "در حال بررسی بازار..."))
     elif message.text == "آمار معاملات امروز":
@@ -229,4 +281,4 @@ def handle_messages(message):
 
 if __name__ == "__main__":
     bot.infinity_polling()
-    
+                
