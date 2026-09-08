@@ -8,7 +8,6 @@ import telebot
 from telebot import types
 from datetime import datetime
 
-# --- خواندن توکن از ریلی‌وی و کلیدهای صرافی از داخل کد ---
 TELEGRAM_TOKEN = os.getenv("TOKEN")
 XT_API_KEY = "c25d4d1a-b496-4c2a-a8ee-599cee26b975"
 XT_SECRET_KEY = "e8b8bc8b8d3ee498ac71194becd6498ecc2f67bd"
@@ -32,7 +31,10 @@ def test_xt_connection():
         url = XT_BASE_URL + path
         timestamp = str(int(time.time() * 1000))
         
+        # برای درخواست‌های GET در فیوچرز XT، امضا بر اساس پارامترهای URL ساخته می‌شود
         params_str = f"timestamp={timestamp}"
+        full_url = f"{url}?{params_str}"
+        
         signature = get_xt_signature(XT_SECRET_KEY, params_str)
         
         headers = {
@@ -43,14 +45,13 @@ def test_xt_connection():
             "Content-Type": "application/json"
         }
         
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(full_url, headers=headers, timeout=10)
         
         try:
             data = response.json()
         except:
-            return False, f"پاسخ خام غیرقابل پردازش از صرافی: {response.text}"
+            return False, f"پاسخ خام سرور: {response.text}"
         
-        # بررسی وضعیت و نمایش دلیل دقیق در صورت بروز خطا
         if response.status_code == 200 and data.get("returnCode") == 0:
             return True, "اتصال با موفقیت برقرار شد و حساب آماده است."
         else:
@@ -59,7 +60,7 @@ def test_xt_connection():
             return False, f"کد خطا: {err_code} | دلیل صرافی: {err_msg}"
             
     except Exception as e:
-        return False, f"خطای ارتباط شبکه: {str(e)}"
+        return False, f"خطای شبکه: {str(e)}"
 
 def place_real_xt_order(symbol, direction, price):
     try:
@@ -166,4 +167,3 @@ def handle_messages(message):
 
 if __name__ == "__main__":
     bot.infinity_polling()
-        
