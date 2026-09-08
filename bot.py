@@ -1,19 +1,19 @@
 import os
 import threading
 import time
+import hmac
+import hashlib
+import requests
 from datetime import datetime
 import telebot
 from telebot import types
-from pyxt.perp import Perp
 
 TELEGRAM_TOKEN = os.getenv("TOKEN")
 XT_API_KEY = "c25d4d1a-b496-4c2a-a8ee-599cee26b975"
 XT_SECRET_KEY = "e8b8bc8b8d3ee498ac71194becd6498ecc2f67bd"
+XT_BASE_URL = "https://fapi.xt.com"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-xt_perp = Perp(
-    host="https://fapi.xt.com", access_key=XT_API_KEY, secret_key=XT_SECRET_KEY
-)
 
 daily_stats = {
     "signals_opened": 0,
@@ -24,39 +24,67 @@ daily_stats = {
 }
 
 
-def test_xt_connection():
+def get_xt_signature(secret_key, message):
+  return hmac.new(
+      secret_key.encode("utf-8"),
+      message.encode("utf-8"),
+      hashlib.sha256,
+  ).hexdigest()
+
+
+def send_xt_request(method, endpoint, params=None):
   try:
-    account_info = xt_perp.get_account_capital()
-    if account_info:
-      return (
-          True,
-          "اتصال به حساب فیوچرز صرافی با موفقیت از طریق پکیج رسمی برقرار شد.",
-      )
+    timestamp = str(int(time.time() * 1000))
+    path = f"/future/user/v1{endpoint}" if "user" in endpoint else f"/future/market/v1{endpoint}"
+    
+    query_string = ""
+    if params and method == "GET":
+      query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
+      path = f"{path}?{query_string}"
+
+    sign_payload = f"{method.upper()}\n{path}\n{timestamp}"
+    signature = get_xt_signature(XT_SECRET_KEY, sign_payload)
+
+    headers = {
+        "xt-app-key": XT_API_KEY,
+        "xt-access-timestamp": timestamp,
+        "xt-signature": signature,
+        "Content-Type": "application/json",
+    }
+
+    url = f"{XT_BASE_URL}{path}"
+    if method == "GET":
+      response = requests.get(url, headers=headers, timeout=10)
     else:
-      return False, f"پاسخ صرافی خالی بود: {account_info}"
+      response = requests.post(url, headers=headers, json=params, timeout=10)
+
+    return response.json()
   except Exception as e:
-    return (
-        False,
-        f"خطای اتصال (محدودیت IP یا اعتبار کلید را بررسی کنید): {str(e)}",
-    )
+    return {"returnCode": 999, "msgInfo": str(e)}
+
+
+def test_xt_connection():
+  res = send_xt_request("GET", "/account/balance")
+  if isinstance(res, dict) and res.get("returnCode") == 0:
+    return True, "اتصال به حساب فیوچرز صرافی با موفقیت برقرار شد."
+  else:
+    return False, f"خطای اتصال صرافی: {res}"
 
 
 def get_account_balance_details():
-  try:
-    capital = xt_perp.get_account_capital()
-    if capital:
-      return f"📊 وضعیت دارایی و کیف پول فیوچرز صرافی XT:\n\n{str(capital)}"
-    else:
-      return "اطلاعات موجودی از صرافی دریافت نشد."
-  except Exception as e:
-    return f"خطا در دریافت موجودی حساب: {str(e)}"
+  res = send_xt_request("GET", "/account/balance")
+  if isinstance(res, dict) and res.get("returnCode") == 0:
+    data = res.get("result", {})
+    balance = data.get("balance", "1.0")
+    available = data.get("availableBalance", "1.0")
+    return f"📊 وضعیت کیف پول فیوچرز صرافی XT:\n\nموجودی کل: {balance} USDT\nموجودی قابل استفاده: {available} USDT"
+  else:
+    return f"خطا در دریافت موجودی از صرافی:\n{res}"
 
 
 def advanced_candlestick_and_market_analysis():
   try:
-    import requests
-
-    url = f"https://fapi.xt.com/future/market/v1/public/q/kline?symbol=btc_usdt&interval=15m&limit=30"
+    url = f"{XT_BASE_URL}/future/market/v1/public/q/kline?symbol=btc_usdt&interval=15m&limit=30"
     response = requests.get(url, timeout=10)
     data = response.json()
 
@@ -77,12 +105,10 @@ def advanced_candlestick_and_market_analysis():
       prev_close = closes[-2]
       prev_open = opens[-2]
 
-      # تشخیص دقیق الگوهای کلاسیک جهان کندل‌خوانی
       body = abs(curr_close - curr_open)
       upper_shadow = curr_high - max(curr_close, curr_open)
       lower_shadow = min(curr_close, curr_open) - curr_low
 
-      # ۱. الگوی اینگالفینگ (پوشاننده)
       is_bullish_engulfing = (
           (prev_close < prev_open)
           and (curr_close > curr_open)
@@ -96,22 +122,15 @@ def advanced_candlestick_and_market_analysis():
           and (curr_open >= prev_close)
       )
 
-      # ۲. الگوی چکش صعودی (Hammer) و ستاره دنباله‌دار نزولی (Shooting Star)
-      is_hammer = (lower_shadow >= 2 * body) and (
-          upper_shadow <= 0.2 * body
-      )  # چکش صعودی
-      is_shooting_star = (upper_shadow >= 2 * body) and (
-          lower_shadow <= 0.2 * body
-      )  # ستاره دنباله‌دار
+      is_hammer = (lower_shadow >= 2 * body) and (upper_shadow <= 0.2 * body)
+      is_shooting_star = (upper_shadow >= 2 * body) and (lower_shadow <= 0.2 * body)
 
-      # اندیکاتورهای روند و حجم
       sma_short = sum(closes[-5:]) / 5
       sma_long = sum(closes[-15:]) / 15
 
       avg_volume = sum(volumes[-6:-1]) / 5 if len(volumes) >= 6 else volumes[-1]
       is_volume_confirmed = volumes[-1] > (avg_volume * 1.1)
 
-      # حافظه تطبیقی برای جلوگیری از ضرر تکراری
       recent_failures = [
           t for t in daily_stats["trades_history"][-4:] if not t["success"]
       ]
@@ -119,7 +138,6 @@ def advanced_candlestick_and_market_analysis():
       if len(recent_failures) >= 2:
         avoid_direction = recent_failures[-1]["direction"]
 
-      # شرط ورود بسیار مطمئن (تلاقی کندل خوانی + روند + تایید حجم)
       if (
           sma_short > sma_long
           and (is_bullish_engulfing or is_hammer)
@@ -137,10 +155,7 @@ def advanced_candlestick_and_market_analysis():
             "action": "BUY",
             "price": current_price,
             "pattern": pattern_name,
-            "reason": (
-                f"تایید هم‌زمان روند، الگوی کندل‌خوانی {pattern_name} و جهش"
-                " حجم خرید"
-            ),
+            "reason": f"تایید هم‌زمان روند، کندل {pattern_name} و حجم خرید",
             "tp": round(current_price * 1.018, 2),
             "sl": round(current_price * 0.992, 2),
         }
@@ -162,27 +177,18 @@ def advanced_candlestick_and_market_analysis():
             "action": "SELL",
             "price": current_price,
             "pattern": pattern_name,
-            "reason": (
-                f"تایید هم‌زمان روند، الگوی کندل‌خوانی {pattern_name} و حجم"
-                " سنگین فروش"
-            ),
+            "reason": f"تایید هم‌زمان روند، کندل {pattern_name} و حجم فروش",
             "tp": round(current_price * 0.982, 2),
             "sl": round(current_price * 1.008, 2),
         }
       else:
         return {
             "status": "neutral",
-            "message": (
-                "بازار فاقد شرایط صددرصدی مطمئن؛ ربات هوشمندانه منتظر سیگنال"
-                " کم‌ریسک می‌ماند."
-            ),
+            "message": "بازار فاقد شرایط صددرصدی مطمئن؛ ربات منتظر می‌ماند.",
         }
-    return {
-        "status": "error",
-        "message": f"خطای کندل: {response.status_code}",
-    }
+    return {"status": "error", "message": "خطای دریافت کندل"}
   except Exception as e:
-    return {"status": "error", "message": f"خطای تحلیل پیشرفته: {str(e)}"}
+    return {"status": "error", "message": str(e)}
 
 
 def execute_auto_trade(chat_id):
@@ -194,53 +200,51 @@ def execute_auto_trade(chat_id):
         action = analysis["action"]
         price = analysis["price"]
         trend = analysis["trend"]
-        reason = analysis["reason"]
         pattern = analysis["pattern"]
         tp = analysis["tp"]
         sl = analysis["sl"]
 
         position_side = "1" if action == "BUY" else "2"
         side = "1" if action == "BUY" else "2"
+        applied_leverage = 50
 
         success_order = False
         order_error = ""
-        applied_leverage = 50
 
         try:
-          try:
-            xt_perp.submit_leverage(
-                symbol="btc_usdt",
-                leverage=str(applied_leverage),
-                positionSide=position_side,
-            )
-          except:
-            pass
+          send_xt_request(
+              "POST",
+              "/position/leverage",
+              {"symbol": "btc_usdt", "leverage": applied_leverage, "positionSide": position_side},
+          )
 
-          capital_info = xt_perp.get_account_capital()
+          bal_res = send_xt_request("GET", "/account/balance")
           available_balance = 1.0
-          if isinstance(capital_info, dict):
+          if isinstance(bal_res, dict) and bal_res.get("returnCode") == 0:
             available_balance = float(
-                capital_info.get(
-                    "availableBalance", capital_info.get("balance", 1.0)
-                )
+                bal_res.get("result", {}).get("availableBalance", 1.0)
             )
-          elif isinstance(capital_info, (int, float)):
-            available_balance = float(capital_info)
 
           total_power = max(available_balance, 1.0) * applied_leverage
           calculated_volume = round(total_power / price, 4)
           volume = str(max(calculated_volume, 0.0001))
 
-          order_res = xt_perp.submit_order(
-              symbol="btc_usdt",
-              orderType="1",
-              entrustType="1",
-              bizType="1",
-              positionSide=position_side,
-              side=side,
-              vol=volume,
-          )
-          success_order = True
+          order_params = {
+              "symbol": "btc_usdt",
+              "orderType": "1",
+              "entrustType": "1",
+              "bizType": "1",
+              "positionSide": position_side,
+              "side": side,
+              "vol": volume,
+          }
+          res_order = send_xt_request("POST", "/order/create", order_params)
+
+          if isinstance(res_order, dict) and res_order.get("returnCode") == 0:
+            success_order = True
+          else:
+            success_order = False
+            order_error = str(res_order)
         except Exception as ex:
           success_order = False
           order_error = str(ex)
@@ -260,20 +264,16 @@ def execute_auto_trade(chat_id):
 
           if chat_id:
             msg = (
-                f"🚨 سیگنال مطمئن بر اساس کندل‌خوانی اجرا شد!\n\n"
-                f"الگوی کندل: {pattern}\nروند: {trend}\nجهت معامله: {action}\n"
-                f"اهرم: {applied_leverage}x\nقیمت ورود: {price}\n"
-                f"حد سود: {tp}\nحد ضرر: {sl}"
+                f"🚨 معامله اتوماتیک اجرا شد!\n\n"
+                f"کندل: {pattern}\nروند: {trend}\nجهت: {action}\n"
+                f"اهرم: {applied_leverage}x\nقیمت: {price}\nحد سود: {tp}\nحد ضرر: {sl}"
             )
             bot.send_message(chat_id, msg)
         else:
           daily_stats["failed_trades"] += 1
           daily_stats["consecutive_losses"] += 1
           if chat_id:
-            bot.send_message(
-                chat_id,
-                f"خطای صرافی در اجرای خودکار:\n{order_error}",
-            )
+            bot.send_message(chat_id, f"خطای صرافی در ثبت پوزیشن:\n{order_error}")
 
       time.sleep(900)
     except Exception as e:
@@ -289,11 +289,10 @@ def nightly_report_scheduler(chat_id):
     if now.hour == 21 and now.minute == 0:
       if chat_id:
         report = (
-            "گزارش عملکرد ۲۴ ساعته ربات کندل‌خوانی\n\n"
-            f"سیگنال‌های باکیفیت صید شده: {daily_stats['signals_opened']}\n"
+            "گزارش عملکرد ۲۴ ساعته ربات\n\n"
+            f"مجموع معاملات: {daily_stats['signals_opened']}\n"
             f"موفق: {daily_stats['successful_trades']}\n"
-            f"خطاها: {daily_stats['failed_trades']}\n"
-            "استراتژی: کندل‌خوانی کامل + مدیریت اتوماتیک سرمایه"
+            f"خطاها: {daily_stats['failed_trades']}"
         )
         bot.send_message(chat_id, report)
       time.sleep(3600)
@@ -313,22 +312,11 @@ def send_welcome(message):
   )
 
   success, conn_msg = test_xt_connection()
-  if success:
-    intro_msg = (
-        "ربات هوشمند کندل‌خوانی با دکمه موجودی حساب روشن شد!\n\n"
-        f"{conn_msg}"
-    )
-  else:
-    intro_msg = f"اتصال صرافی نیازمند بررسی کلیدهاست:\n{conn_msg}"
-
+  intro_msg = f"ربات هوشمند روشن شد!\n\n{conn_msg}"
   bot.send_message(chat_id, intro_msg, reply_markup=markup)
 
-  threading.Thread(
-      target=execute_auto_trade, args=(chat_id,), daemon=True
-  ).start()
-  threading.Thread(
-      target=nightly_report_scheduler, args=(chat_id,), daemon=True
-  ).start()
+  threading.Thread(target=execute_auto_trade, args=(chat_id,), daemon=True).start()
+  threading.Thread(target=nightly_report_scheduler, args=(chat_id,), daemon=True).start()
 
 
 @bot.message_handler(func=lambda message: True)
@@ -336,7 +324,7 @@ def handle_messages(message):
   global daily_stats
   if message.text == "وضعیت اتصال صرافی":
     success, msg = test_xt_connection()
-    bot.send_message(message.chat.id, f"{msg}" if success else f"{msg}")
+    bot.send_message(message.chat.id, msg)
   elif message.text == "موجودی حساب":
     balance_msg = get_account_balance_details()
     bot.send_message(message.chat.id, balance_msg)
@@ -345,21 +333,14 @@ def handle_messages(message):
     if res["status"] == "success":
       bot.send_message(
           message.chat.id,
-          f"وضعیت کلیدی بازار:\nالگوی کندل: {res['pattern']}\nروند:"
-          f" {res['trend']}\nپیشنهاد: {res['action']}\nدلیل: {res['reason']}\nقیمت:"
-          f" {res['price']}",
+          f"وضعیت بازار:\nکندل: {res['pattern']}\nروند: {res['trend']}\nپیشنهاد: {res['action']}\nقیمت: {res['price']}",
       )
     else:
-      bot.send_message(
-          message.chat.id,
-          f"{res.get('message', 'بازار در حال بررسی است.')}",
-      )
+      bot.send_message(message.chat.id, res.get("message", "در حال بررسی بازار..."))
   elif message.text == "آمار معاملات امروز":
     stats_msg = (
-        "آمار عملکرد اتوماتیک کندل‌خوانی:\n\n"
-        f"مجموع معاملات: {daily_stats['signals_opened']}\n"
-        f"موفق: {daily_stats['successful_trades']} | خطا:"
-        f" {daily_stats['failed_trades']}"
+        f"آمار عملکرد:\n\nمجموع معاملات: {daily_stats['signals_opened']}\n"
+        f"موفق: {daily_stats['successful_trades']} | خطا: {daily_stats['failed_trades']}"
     )
     bot.send_message(message.chat.id, stats_msg)
   else:
@@ -368,4 +349,4 @@ def handle_messages(message):
 
 if __name__ == "__main__":
   bot.infinity_polling()
-          
+        
