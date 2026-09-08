@@ -90,7 +90,7 @@ def advanced_smart_market_analysis():
             "trend": "صعودی معتبر (Bullish)",
             "action": "BUY",
             "price": current_price,
-            "reason": "تشخیص الگوی کندل‌پترن صعودی و میانگین متحرک",
+            "reason": "تشخیص الگوی کندل پترن صعودی و میانگین متحرک",
             "tp": round(current_price * 1.015, 2),
             "sl": round(current_price * 0.994, 2),
         }
@@ -103,7 +103,7 @@ def advanced_smart_market_analysis():
             "trend": "نزولی معتبر (Bearish)",
             "action": "SELL",
             "price": current_price,
-            "reason": "تشخیص الگوی کندل‌پترن نزولی و فشار فروش",
+            "reason": "تشخیص الگوی کندل پترن نزولی و فشار فروش",
             "tp": round(current_price * 0.985, 2),
             "sl": round(current_price * 1.006, 2),
         }
@@ -168,26 +168,24 @@ def execute_auto_trade(chat_id):
 
           if chat_id:
             msg = (
-                f"🚀 **معامله هوشمند مبتنی بر کندل‌پترن ثبت شد!**\n\n"
-                f"📈 روند: {trend}\n🎯 جهت: {action}\n💲 قیمت ورود: {price}\n"
-                f"💡 تحلیل تکنیکال: {reason}\n🟢 حد سود (TP): {tp}\n🔴 حد ضرر"
-                f" (SL): {sl}"
+                "معامله هوشمند مبتنی بر کندل پترن ثبت شد!\n\n"
+                f"روند: {trend}\nجهت: {action}\nقیمت ورود: {price}\n"
+                f"تحلیل تکنیکال: {reason}\nحد سود (TP): {tp}\nحد ضرر (SL):"
+                f" {sl}"
             )
-            bot.send_message(chat_id, msg, parse_mode="Markdown")
+            bot.send_message(chat_id, msg)
         else:
           daily_stats["failed_trades"] += 1
           daily_stats["consecutive_losses"] += 1
           if chat_id:
             bot.send_message(
-                chat_id,
-                f"⚠️ **خطای صرافی (ثبت در حافظه تطبیقی):**\n{order_error}",
-                parse_mode="Markdown",
+                chat_id, f"خطای صرافی (ثبت در حافظه تطبیقی):\n{order_error}"
             )
 
       time.sleep(900)
     except Exception as e:
       if chat_id:
-        bot.send_message(chat_id, f"⚠️ **خطای سیستم:** {str(e)}")
+        bot.send_message(chat_id, f"خطای سیستم: {str(e)}")
       time.sleep(60)
 
 
@@ -198,13 +196,13 @@ def nightly_report_scheduler(chat_id):
     if now.hour == 21 and now.minute == 0:
       if chat_id:
         report = (
-            f"🌙 **گزارش عملکرد ۲۴ ساعته ربات**\n\n"
-            f"📊 کل سیگنال‌های باکیفیت: {daily_stats['signals_opened']}\n"
-            f"✅ معاملات موفق: {daily_stats['successful_trades']}\n"
-            f"❌ خطاها/ناموفق: {daily_stats['failed_trades']}\n"
-            f"🧠 وضعیت یادگیری از الگوها: فعال و به‌روز"
+            "گزارش عملکرد ۲۴ ساعته ربات\n\n"
+            f"کل سیگنال‌های باکیفیت: {daily_stats['signals_opened']}\n"
+            f"معاملات موفق: {daily_stats['successful_trades']}\n"
+            f"خطاها/ناموفق: {daily_stats['failed_trades']}\n"
+            "وضعیت یادگیری از الگوها: فعال و به‌روز"
         )
-        bot.send_message(chat_id, report, parse_mode="Markdown")
+        bot.send_message(chat_id, report)
       time.sleep(3600)
     else:
       time.sleep(30)
@@ -222,13 +220,11 @@ def send_welcome(message):
 
   success, conn_msg = test_xt_connection()
   if success:
-    intro_msg = (
-        f"✅ **ربات هوشمند کندل‌خوان با پکیج رسمی روشن شد!**\n\n{conn_msg}"
-    )
+    intro_msg = f"ربات هوشمند کندل‌خوان با پکیج رسمی روشن شد!\n\n{conn_msg}"
   else:
-    intro_msg = f"❌ **اتصال صرافی نیازمند بررسی کلیدهاست:**\n{conn_msg}"
+    intro_msg = f"اتصال صرافی نیازمند بررسی کلیدهاست:\n{conn_msg}"
 
-  bot.send_message(chat_id, intro_msg, parse_mode="Markdown", reply_markup=markup)
+  bot.send_message(chat_id, intro_msg, reply_markup=markup)
 
   threading.Thread(
       target=execute_auto_trade, args=(chat_id,), daemon=True
@@ -243,31 +239,30 @@ def handle_messages(message):
   global daily_stats
   if message.text == "وضعیت اتصال صرافی":
     success, msg = test_xt_connection()
-    bot.send_message(message.chat.id, f"✅ {msg}" if success else f"❌ {msg}")
+    bot.send_message(message.chat.id, f"{msg}" if success else f"{msg}")
   elif message.text == "تحلیل لحظه‌ای بازار":
     res = advanced_smart_market_analysis()
     if res["status"] == "success":
       bot.send_message(
           message.chat.id,
-          f"📊 تحلیل کندل‌پترن بازار:\nروند:"
-          f" {res['trend']}\nپیشنهاد: {res['action']}\nدلیل:"
-          f" {res['reason']}\nقیمت: {res['price']}",
+          f"تحلیل کندل‌پترن بازار:\nروند: {res['trend']}\nپیشنهاد:"
+          f" {res['action']}\nدلیل: {res['reason']}\nقیمت: {res['price']}",
       )
     else:
       bot.send_message(
           message.chat.id,
-          f"📌 {res.get('message', 'بازار در حال بررسی است.')}",
+          f"{res.get('message', 'بازار در حال بررسی است.')}",
       )
   elif message.text == "آمار معاملات امروز":
     stats_msg = (
-        f"📈 **آمار عملکرد و یادگیری:**\n\n"
+        "آمار عملکرد و یادگیری:\n\n"
         f"مجموع معاملات: {daily_stats['signals_opened']}\n"
         f"موفق: {daily_stats['successful_trades']} | خطا:"
         f" {daily_stats['failed_trades']}"
     )
-    bot.send_message(message.chat.id, stats_msg, parse_mode="Markdown")
+    bot.send_message(message.chat.id, stats_msg)
   else:
-    bot.send_message(message.chat.id, f"لطفاً از دکمه‌های منو استفاده کنید.")
+    bot.send_message(message.chat.id, "لطفاً از دکمه‌های منو استفاده کنید.")
 
 
 if __name__ == "__main__":
