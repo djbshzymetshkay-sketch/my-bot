@@ -10,9 +10,9 @@ import requests
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-TOKEN = "8763614980:AAHL0zk_C8Y8Inrms7wjI9gksEXwS-EgsZc"
-XT_API_KEY = "c25d4d1a-b496-4c2a-a8ee-599cee26b975"
-XT_SECRET_KEY = "4f1f059a2c87a642129e38e7f86b9ab149e4d8a"
+TOKEN = os.environ.get("TOKEN", "")
+XT_API_KEY = os.environ.get("XT_API_KEY", "c25d4d1a-b496-4c2a-a8ee-599cee26b975")
+XT_SECRET_KEY = os.environ.get("XT_SECRET_KEY", "4f1f059a2c87a642129e38e7f86b9ab149e4d8a")
 ADMIN_ID = 7178006484
 
 bot = telebot.TeleBot(TOKEN)
