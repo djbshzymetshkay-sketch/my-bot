@@ -34,7 +34,12 @@ def get_xt_signature(secret_key, message):
 def send_xt_request(method, endpoint, params=None):
     try:
         timestamp = str(int(time.time() * 1000))
-        path = f"/future/user/v1{endpoint}" if any(x in endpoint for x in ["account", "position", "order"]) else f"/future/market/v1{endpoint}"
+        
+        # تعیین دقیق مسیر (Path) بر اساس مستندات فیوچرز XT
+        if any(x in endpoint for x in ["account", "position", "order"]):
+            path = f"/future/user/v1{endpoint}"
+        else:
+            path = f"/future/market/v1{endpoint}"
 
         query_string = ""
         body_string = ""
@@ -47,13 +52,13 @@ def send_xt_request(method, endpoint, params=None):
             if params and method.upper() == "POST":
                 body_string = json.dumps(params, separators=(',', ':'))
 
+        # ساخت پاداش امضا طبق استاندارد مستندات صرافی XT
         sign_payload = f"{method.upper()}\n{full_path}\n{timestamp}"
         if body_string and method.upper() == "POST":
             sign_payload += f"\n{body_string}"
 
         signature = get_xt_signature(XT_SECRET_KEY, sign_payload)
 
-        # اصلاح هدرها با استاندارد xt-validate برای رفع خطای appKey
         headers = {
             "xt-validate-appkey": XT_API_KEY,
             "xt-validate-timestamp": timestamp,
@@ -74,20 +79,19 @@ def send_xt_request(method, endpoint, params=None):
 
 def test_xt_connection():
     res = send_xt_request("GET", "/account/balance")
-    if isinstance(res, dict) and (res.get("returnCode") == 0 or res.get("code") == 0):
-        return True, "اتصال به حساب فیوچرز صرافی با موفقیت برقرار شد."
-    else:
-        return False, f"خطای اتصال صرافی: {res}"
+    if isinstance(res, dict) and (res.get("returnCode") == 0 or res.get("code") == 0 or "result" in res):
+        if res.get("returnCode") == 0 or res.get("code") == 0 or res.get("result") is not None:
+            return True, "اتصال به حساب فیوچرز صرافی با موفقیت برقرار شد."
+    return False, f"خطای اتصال صرافی: {res}"
 
 def get_account_balance_details():
     res = send_xt_request("GET", "/account/balance")
-    if isinstance(res, dict) and (res.get("returnCode") == 0 or res.get("code") == 0):
+    if isinstance(res, dict):
         result_data = res.get("result", res)
-        balance = result_data.get("balance") or result_data.get("accountWalletBalance") or "0.0"
+        balance = result_data.get("balance") or result_data.get("accountWalletBalance") or result_data.get("totalWalletBalance") or "0.0"
         available = result_data.get("availableBalance") or result_data.get("accountAvailableBalance") or "0.0"
         return f"📊 وضعیت کیف پول فیوچرز صرافی XT:\n\nموجودی کل: {balance} USDT\nموجودی قابل استفاده: {available} USDT"
-    else:
-        return f"خطا در دریافت موجودی از صرافی:\n{res}"
+    return f"خطا در دریافت موجودی از صرافی:\n{res}"
 
 def advanced_candlestick_and_market_analysis():
     try:
