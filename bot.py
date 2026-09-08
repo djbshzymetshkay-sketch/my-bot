@@ -28,12 +28,11 @@ def get_xt_signature(secret_key, message):
 
 def test_xt_connection():
     try:
-        path = "/future/user/v1/balance/list"
+        path = "/future/user/v1/account/detail"
         url = XT_BASE_URL + path
         timestamp = str(int(time.time() * 1000))
         
-        query_string = f"timestamp={timestamp}"
-        signature_payload = f"Y=#{path}#{query_string}"
+        signature_payload = f"Y=#{path}#"
         signature = get_xt_signature(XT_SECRET_KEY, signature_payload)
         
         headers = {
@@ -43,22 +42,22 @@ def test_xt_connection():
             "Content-Type": "application/x-www-form-urlencoded"
         }
         
-        response = requests.get(f"{url}?{query_string}", headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=10)
         
         try:
             data = response.json()
         except Exception:
-            return False, f"پاسخ نامعتبر از سرور: {response.text}"
+            return False, f"پاسخ خام غیرقابل پردازش از صرافی: {response.text}"
         
         if response.status_code == 200 and data.get("returnCode") == 0:
             return True, "اتصال به صرافی با موفقیت برقرار شد و حساب فعال است."
         else:
             err_code = data.get("returnCode", response.status_code)
             err_msg = data.get("retMsg") or data.get("msg") or str(data)
-            return False, f"خطای صرافی -> کد: {err_code} | دلیل: {err_msg}"
+            return False, f"کد خطای صرافی: {err_code} | دلیل: {err_msg}"
             
     except Exception as e:
-        return False, f"خطای شبکه یا ارتباط با اینترنت: {str(e)}"
+        return False, f"خطای ارتباط شبکه یا تایم‌اوت: {str(e)}"
 
 def place_real_xt_order(symbol, direction, price):
     try:
@@ -202,15 +201,21 @@ def nightly_report_scheduler(chat_id):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    success, conn_msg = test_xt_connection()
+    chat_id = message.chat.id
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(types.KeyboardButton("وضعیت اتصال صرافی"), types.KeyboardButton("تحلیل لحظه‌ای بازار"), types.KeyboardButton("آمار معاملات امروز"))
     
-    status_icon = "✅" if success else "❌"
-    bot.send_message(message.chat.id, f"سلام! ربات روشن شد.\n\n{status_icon} {conn_msg}", reply_markup=markup)
+    # تست اتصال در لحظه استارت و ارسال خودکار نتیجه به کاربر
+    success, conn_msg = test_xt_connection()
+    if success:
+        intro_msg = f"✅ **ربات با موفقیت روشن شد و اتصال به صرافی برقرار است!**\n\nجزئیات: {conn_msg}"
+    else:
+        intro_msg = f"❌ **ربات روشن شد اما اتصال به صرافی با خطا مواجه شد!**\n\nعلت دقیق خطا:\n{conn_msg}"
+        
+    bot.send_message(chat_id, intro_msg, parse_mode="Markdown", reply_markup=markup)
     
-    threading.Thread(target=execute_auto_trade, args=(message.chat.id,), daemon=True).start()
-    threading.Thread(target=nightly_report_scheduler, args=(message.chat.id,), daemon=True).start()
+    threading.Thread(target=execute_auto_trade, args=(chat_id,), daemon=True).start()
+    threading.Thread(target=nightly_report_scheduler, args=(chat_id,), daemon=True).start()
 
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
@@ -236,5 +241,4 @@ def handle_messages(message):
 
 if __name__ == "__main__":
     bot.infinity_polling()
-
     
