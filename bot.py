@@ -39,7 +39,7 @@ def test_xt_connection():
         headers = {
             "validate-appkey": XT_API_KEY,
             "validate-timestamp": timestamp,
-            "validate-singature": signature,
+            "validate-signature": signature,
             "Content-Type": "application/x-www-form-urlencoded"
         }
         
@@ -87,7 +87,7 @@ def place_real_xt_order(symbol, direction, price):
         headers = {
             "validate-appkey": XT_API_KEY,
             "validate-timestamp": timestamp,
-            "validate-singature": signature,
+            "validate-signature": signature,
             "Content-Type": "application/x-www-form-urlencoded"
         }
         
@@ -236,4 +236,4 @@ def handle_messages(message):
 
 if __name__ == "__main__":
     bot.infinity_polling()
-                                                                       
+    
