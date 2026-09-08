@@ -8,8 +8,8 @@ import telebot
 from telebot import types
 from datetime import datetime
 
-# --- توکن تلگرام از متغیرهای محیطی ریلی‌وی خوانده می‌شود ---
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+# --- توکن تلگرام از متغیر TOKEN خوانده می‌شود ---
+TELEGRAM_TOKEN = os.getenv("TOKEN")
 
 # --- کلیدهای صرافی مستقیماً داخل کد قرار دارند ---
 XT_API_KEY = "f0bc1205-71c0-46d6-9305-fcfbf7402af5"
@@ -194,3 +194,4 @@ def handle_messages(message):
 if __name__ == "__main__":
     print("Bot is running securely...")
     bot.infinity_polling()
+        
