@@ -8,11 +8,9 @@ import telebot
 from telebot import types
 from datetime import datetime
 
-# --- توکن تلگرام از متغیر TOKEN خوانده می‌شود ---
+# --- توکن تلگرام و کلیدهای صرافی ---
 TELEGRAM_TOKEN = os.getenv("TOKEN")
-
-# --- کلیدهای صرافی مستقیماً داخل کد قرار دارند ---
-XT_API_KEY = "f0bc1205-71c0-46d6-9305-fcfbf7402af5"
+XT_API_KEY = "c25d4d1a-b496-4c2a-a8ee-599cee26b975"
 XT_SECRET_KEY = "e8b8bc8b8d3ee498ac71194becd6498ecc2f67bd"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
@@ -33,6 +31,8 @@ def test_xt_connection():
         path = "/future/user/balance"
         url = XT_BASE_URL + path
         timestamp = str(int(time.time() * 1000))
+        
+        # مرتب‌سازی پارامترها برای ساخت امضای دقیق فیوچرز XT
         params_str = f"timestamp={timestamp}"
         signature = get_xt_signature(XT_SECRET_KEY, params_str)
         
@@ -40,7 +40,8 @@ def test_xt_connection():
             "xt-app-id": XT_API_KEY,
             "xt-access-key": XT_API_KEY,
             "xt-sig": signature,
-            "xt-timestamp": timestamp
+            "xt-timestamp": timestamp,
+            "Content-Type": "application/json"
         }
         
         response = requests.get(url, headers=headers, timeout=10)
@@ -49,7 +50,7 @@ def test_xt_connection():
         if response.status_code == 200 and data.get("returnCode") == 0:
             return True, "ارتباط با صرافی XT برقرار است و حساب آماده معامله است."
         else:
-            return False, f"خطا از صرافی XT: {data.get('retMsg', 'پاسخ نامعتبر')}"
+            return False, f"خطا از صرافی XT: {data.get('retMsg', data.get('msg', 'پاسخ نامعتبر'))}"
     except Exception as e:
         return False, f"خطای شبکه: {str(e)}"
 
@@ -69,7 +70,7 @@ def place_real_xt_order(symbol, direction, price):
             "vol": "0.002"
         }
         
-        body_str = f"symbol={symbol}&orderType=1&entrustType=1&bizType=1&positionSide={payload['positionSide']}&side={payload['side']}&vol=0.002&timestamp={timestamp}"
+        body_str = f"bizType=1&entrustType=1&orderType=1&positionSide={payload['positionSide']}&side={payload['side']}&symbol={symbol}&timestamp={timestamp}&vol=0.002"
         signature = get_xt_signature(XT_SECRET_KEY, body_str)
         
         headers = {
@@ -192,6 +193,6 @@ def handle_messages(message):
         bot.send_message(message.chat.id, "لطفاً از دکمه‌ها استفاده کنید.")
 
 if __name__ == "__main__":
-    print("Bot is running securely...")
+    print("Bot is running...")
     bot.infinity_polling()
         
