@@ -8,11 +8,12 @@ import telebot
 from telebot import types
 from datetime import datetime
 
-# --- تنظیمات اختصاصی شما ---
-TELEGRAM_TOKEN = "7953579040:AAH2q2T4_your_token_here"
+# --- توکن تلگرام از متغیرهای محیطی ریلی‌وی خوانده می‌شود (بدون ارور 401) ---
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+
+# --- کلیدهای صرافی مستقیماً داخل کد قرار دارند ---
 XT_API_KEY = "f0bc1205-71c0-46d6-9305-fcfbf7402af5"
 XT_SECRET_KEY = "e8b8bc8b8d3ee498ac71194becd6498ecc2f67bd"
-ADMIN_CHAT_ID = None
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 XT_BASE_URL = "https://fapi.xt.com"
@@ -28,7 +29,7 @@ def get_xt_signature(secret_key, message):
     return hmac.new(secret_key.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
 
 def test_xt_connection():
-    """تست اتصال به صرافی XT و بررسی موجودی حساب فیوچرز"""
+    """تست اتصال به صرافی XT و بررسی حساب فیوچرز"""
     try:
         path = "/future/user/balance"
         url = XT_BASE_URL + path
@@ -68,7 +69,7 @@ def place_real_xt_order(symbol, direction, price):
             "bizType": "1",
             "positionSide": "1" if direction == "BUY" else "2",
             "side": "1" if direction == "BUY" else "2",
-            "vol": "0.002"  # حجم بهینه برای شروع
+            "vol": "0.002"
         }
         
         body_str = f"symbol={symbol}&orderType=1&entrustType=1&bizType=1&positionSide={payload['positionSide']}&side={payload['side']}&vol=0.002&timestamp={timestamp}"
@@ -82,19 +83,18 @@ def place_real_xt_order(symbol, direction, price):
             "Content-Type": "application/x-www-form-urlencoded"
         }
         
-        # ارسال درخواست به صرافی
         response = requests.post(url, headers=headers, data=payload, timeout=10)
         res_data = response.json()
         
         if response.status_code == 200 and res_data.get("returnCode") == 0:
             return {"returnCode": 0, "msg": "معامله واقعی با موفقیت در صرافی ثبت شد."}
         else:
-            return {"returnCode": -1, "msg": res_data.get("retMsg", "خطای ناشناخته صرافی در ثبت سفارش")}
+            return {"returnCode": -1, "msg": res_data.get("retMsg", "خطای صرافی در ثبت سفارش")}
     except Exception as e:
         return {"returnCode": -1, "msg": str(e)}
 
 def analyze_market_optimized():
-    """تحلیل بهینه‌شده بازار ۱۵ دقیقه‌ای برای افزایش دقت و تعداد سیگنال‌های استاندارد"""
+    """تحلیل بازار ۱۵ دقیقه‌ای"""
     try:
         url = f"{XT_BASE_URL}/future/market/kline?symbol=btc_usdt&interval=15m&limit=5"
         response = requests.get(url, timeout=10)
@@ -107,19 +107,18 @@ def analyze_market_optimized():
             close_price = float(last_candle[4])
             current_price = close_price
             
-            # منطق بهینه‌شده برای سیگنال‌دهی روان‌تر
             if close_price >= open_price:
                 trend = "صعودی (Bullish)"
                 action = "BUY"
                 reason = "تایید مومنتوم صعودی و قدرت خریداران در کندل ۱۵ دقیقه‌ای اخیر."
-                tp = round(current_price * 1.01, 2)  # ۱ درصد سود
-                sl = round(current_price * 0.995, 2) # ۰.۵ درصد ضرر
+                tp = round(current_price * 1.01, 2)
+                sl = round(current_price * 0.995, 2)
             else:
                 trend = "نزولی (Bearish)"
                 action = "SELL"
                 reason = "فشار فروش و برتری فروشندگان در کندل ۱۵ دقیقه‌ای اخیر."
-                tp = round(current_price * 0.99, 2)  # ۱ درصد سود
-                sl = round(current_price * 1.005, 2) # ۰.۵ درصد ضرر
+                tp = round(current_price * 0.99, 2)
+                sl = round(current_price * 1.005, 2)
                 
             return {
                 "status": "success",
@@ -148,7 +147,6 @@ def execute_auto_trade(chat_id):
                 tp = analysis["tp"]
                 sl = analysis["sl"]
                 
-                # اجرای سفارش در صرافی واقعی
                 order_res = place_real_xt_order("btc_usdt", action, price)
                 
                 daily_stats["signals_opened"] += 1
@@ -174,7 +172,6 @@ def execute_auto_trade(chat_id):
                     )
                     bot.send_message(chat_id, msg)
             
-            # بررسی بازار در هر کندل ۱۵ دقیقه
             time.sleep(900)
         except Exception as e:
             print(f"Error: {str(e)}")
@@ -200,9 +197,6 @@ def nightly_report_scheduler(chat_id):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    global ADMIN_CHAT_ID
-    ADMIN_CHAT_ID = message.chat.id
-    
     success, conn_msg = test_xt_connection()
     
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -212,8 +206,8 @@ def send_welcome(message):
     markup.add(btn1, btn2, btn3)
     
     welcome_text = (
-        f"سلام! ربات معاملاتی هوشمند بهینه‌سازی شد.\n\n"
-        f"وضعیت اتصال: {conn_msg}\n\n"
+        f"سلام! ربات معاملاتی هوشمند فعال شد.\n\n"
+        f"وضعیت اتصال صرافی: {conn_msg}\n\n"
         f"ربات روی تایم‌فریم ۱۵ دقیقه فعال است و به صورت خودکار با موجودی شما معامله می‌زند."
     )
     bot.send_message(message.chat.id, welcome_text, reply_markup=markup)
@@ -254,5 +248,5 @@ def handle_messages(message):
         bot.send_message(message.chat.id, "لطفاً از دکمه‌های منو استفاده کنید.")
 
 if __name__ == "__main__":
-    print("Optimized Bot is running...")
+    print("Hybrid Bot is running...")
     bot.infinity_polling()
