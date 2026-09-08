@@ -43,12 +43,12 @@ def test_xt_connection():
             "Content-Type": "application/x-www-form-urlencoded"
         }
         
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(f"{url}?{query_string}", headers=headers, timeout=10)
         
         try:
             data = response.json()
         except Exception:
-            return False, f"پاسخ نامعتبر از سرور (متن خام): {response.text}"
+            return False, f"پاسخ نامعتبر از سرور: {response.text}"
         
         if response.status_code == 200 and data.get("returnCode") == 0:
             return True, "اتصال به صرافی با موفقیت برقرار شد و حساب فعال است."
@@ -236,4 +236,5 @@ def handle_messages(message):
 
 if __name__ == "__main__":
     bot.infinity_polling()
+
     
