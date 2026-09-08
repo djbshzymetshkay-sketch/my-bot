@@ -41,7 +41,18 @@ def test_xt_connection():
     )
 
 
-def advanced_smart_market_analysis():
+def get_account_balance_details():
+  try:
+    capital = xt_perp.get_account_capital()
+    if capital:
+      return f"📊 وضعیت دارایی و کیف پول فیوچرز صرافی XT:\n\n{str(capital)}"
+    else:
+      return "اطلاعات موجودی از صرافی دریافت نشد."
+  except Exception as e:
+    return f"خطا در دریافت موجودی حساب: {str(e)}"
+
+
+def advanced_candlestick_and_market_analysis():
   try:
     import requests
 
@@ -58,27 +69,45 @@ def advanced_smart_market_analysis():
       volumes = [float(c.get("v", 0)) for c in candles]
       current_price = closes[-1]
 
+      curr_open = opens[-1]
+      curr_close = closes[-1]
+      curr_high = highs[-1]
+      curr_low = lows[-1]
+
       prev_close = closes[-2]
       prev_open = opens[-2]
 
-      # استراتژی پیشرفته و سخت‌گیرانه (تلاقی چند اندیکاتور و حجم)
+      # تشخیص دقیق الگوهای کلاسیک جهان کندل‌خوانی
+      body = abs(curr_close - curr_open)
+      upper_shadow = curr_high - max(curr_close, curr_open)
+      lower_shadow = min(curr_close, curr_open) - curr_low
+
+      # ۱. الگوی اینگالفینگ (پوشاننده)
       is_bullish_engulfing = (
           (prev_close < prev_open)
-          and (closes[-1] > opens[-1])
-          and (closes[-1] >= prev_open)
-          and (opens[-1] <= prev_close)
+          and (curr_close > curr_open)
+          and (curr_close >= prev_open)
+          and (curr_open <= prev_close)
       )
       is_bearish_engulfing = (
           (prev_close > prev_open)
-          and (closes[-1] < opens[-1])
-          and (closes[-1] <= prev_open)
-          and (opens[-1] >= prev_close)
+          and (curr_close < curr_open)
+          and (curr_close <= prev_open)
+          and (curr_open >= prev_close)
       )
 
+      # ۲. الگوی چکش صعودی (Hammer) و ستاره دنباله‌دار نزولی (Shooting Star)
+      is_hammer = (lower_shadow >= 2 * body) and (
+          upper_shadow <= 0.2 * body
+      )  # چکش صعودی
+      is_shooting_star = (upper_shadow >= 2 * body) and (
+          lower_shadow <= 0.2 * body
+      )  # ستاره دنباله‌دار
+
+      # اندیکاتورهای روند و حجم
       sma_short = sum(closes[-5:]) / 5
       sma_long = sum(closes[-15:]) / 15
 
-      # بررسی حجم معاملات برای تأیید اعتبار حرکت (حجم کندل آخر بالاتر از میانگین ۵ کندل قبل)
       avg_volume = sum(volumes[-6:-1]) / 5 if len(volumes) >= 6 else volumes[-1]
       is_volume_confirmed = volumes[-1] > (avg_volume * 1.1)
 
@@ -90,37 +119,52 @@ def advanced_smart_market_analysis():
       if len(recent_failures) >= 2:
         avoid_direction = recent_failures[-1]["direction"]
 
-      # شرایط ورود بسیار محتاطانه (درصد اطمینان بالا)
+      # شرط ورود بسیار مطمئن (تلاقی کندل خوانی + روند + تایید حجم)
       if (
           sma_short > sma_long
-          and is_bullish_engulfing
+          and (is_bullish_engulfing or is_hammer)
           and is_volume_confirmed
           and avoid_direction != "BUY"
       ):
+        pattern_name = (
+            "اینگالفینگ صعودی (Bullish Engulfing)"
+            if is_bullish_engulfing
+            else "الگوی چکش صعودی (Hammer)"
+        )
         return {
             "status": "success",
-            "trend": "صعودی فوق‌العاده قوی (تایید حجم و روند)",
+            "trend": "صعودی قوی",
             "action": "BUY",
             "price": current_price,
+            "pattern": pattern_name,
             "reason": (
-                "تلاقی میانگین متحرک صعودی، اینگالفینگ پرقدرت و جهش حجم معاملات"
+                f"تایید هم‌زمان روند، الگوی کندل‌خوانی {pattern_name} و جهش"
+                " حجم خرید"
             ),
             "tp": round(current_price * 1.018, 2),
             "sl": round(current_price * 0.992, 2),
         }
+
       elif (
           sma_short < sma_long
-          and is_bearish_engulfing
+          and (is_bearish_engulfing or is_shooting_star)
           and is_volume_confirmed
           and avoid_direction != "SELL"
       ):
+        pattern_name = (
+            "اینگالفینگ نزولی (Bearish Engulfing)"
+            if is_bearish_engulfing
+            else "الگوی ستاره دنباله‌دار (Shooting Star)"
+        )
         return {
             "status": "success",
-            "trend": "نزولی فوق‌العاده قوی (تایید حجم و فشار فروش)",
+            "trend": "نزولی قوی",
             "action": "SELL",
             "price": current_price,
+            "pattern": pattern_name,
             "reason": (
-                "تلاقی میانگین متحرک نزولی، اینگالفینگ نزولی و حجم بالای فروش"
+                f"تایید هم‌زمان روند، الگوی کندل‌خوانی {pattern_name} و حجم"
+                " سنگین فروش"
             ),
             "tp": round(current_price * 0.982, 2),
             "sl": round(current_price * 1.008, 2),
@@ -145,20 +189,48 @@ def execute_auto_trade(chat_id):
   global daily_stats
   while True:
     try:
-      analysis = advanced_smart_market_analysis()
+      analysis = advanced_candlestick_and_market_analysis()
       if analysis["status"] == "success":
         action = analysis["action"]
         price = analysis["price"]
         trend = analysis["trend"]
         reason = analysis["reason"]
+        pattern = analysis["pattern"]
         tp = analysis["tp"]
         sl = analysis["sl"]
 
-        volume = "0.002"
         position_side = "1" if action == "BUY" else "2"
         side = "1" if action == "BUY" else "2"
 
+        success_order = False
+        order_error = ""
+        applied_leverage = 50
+
         try:
+          try:
+            xt_perp.submit_leverage(
+                symbol="btc_usdt",
+                leverage=str(applied_leverage),
+                positionSide=position_side,
+            )
+          except:
+            pass
+
+          capital_info = xt_perp.get_account_capital()
+          available_balance = 1.0
+          if isinstance(capital_info, dict):
+            available_balance = float(
+                capital_info.get(
+                    "availableBalance", capital_info.get("balance", 1.0)
+                )
+            )
+          elif isinstance(capital_info, (int, float)):
+            available_balance = float(capital_info)
+
+          total_power = max(available_balance, 1.0) * applied_leverage
+          calculated_volume = round(total_power / price, 4)
+          volume = str(max(calculated_volume, 0.0001))
+
           order_res = xt_perp.submit_order(
               symbol="btc_usdt",
               orderType="1",
@@ -169,7 +241,6 @@ def execute_auto_trade(chat_id):
               vol=volume,
           )
           success_order = True
-          order_error = ""
         except Exception as ex:
           success_order = False
           order_error = str(ex)
@@ -189,10 +260,10 @@ def execute_auto_trade(chat_id):
 
           if chat_id:
             msg = (
-                "سیگنال با دقت بالا اجرا شد!\n\n"
-                f"روند: {trend}\nجهت: {action}\nقیمت ورود: {price}\n"
-                f"تحلیل تکنیکال: {reason}\nحد سود (TP): {tp}\nحد ضرر (SL):"
-                f" {sl}"
+                f"🚨 سیگنال مطمئن بر اساس کندل‌خوانی اجرا شد!\n\n"
+                f"الگوی کندل: {pattern}\nروند: {trend}\nجهت معامله: {action}\n"
+                f"اهرم: {applied_leverage}x\nقیمت ورود: {price}\n"
+                f"حد سود: {tp}\nحد ضرر: {sl}"
             )
             bot.send_message(chat_id, msg)
         else:
@@ -201,8 +272,7 @@ def execute_auto_trade(chat_id):
           if chat_id:
             bot.send_message(
                 chat_id,
-                f"خطای صرافی در ثبت پوزیشن پرریسک (ثبت در حافظه تطبیقی):\n"
-                f"{order_error}",
+                f"خطای صرافی در اجرای خودکار:\n{order_error}",
             )
 
       time.sleep(900)
@@ -219,11 +289,11 @@ def nightly_report_scheduler(chat_id):
     if now.hour == 21 and now.minute == 0:
       if chat_id:
         report = (
-            "گزارش عملکرد ۲۴ ساعته ربات (فیلتر سخت‌گیرانه)\n\n"
+            "گزارش عملکرد ۲۴ ساعته ربات کندل‌خوانی\n\n"
             f"سیگنال‌های باکیفیت صید شده: {daily_stats['signals_opened']}\n"
             f"موفق: {daily_stats['successful_trades']}\n"
             f"خطاها: {daily_stats['failed_trades']}\n"
-            "وضعیت هوش مصنوعی: فعال و کاملاً محافظه‌کار"
+            "استراتژی: کندل‌خوانی کامل + مدیریت اتوماتیک سرمایه"
         )
         bot.send_message(chat_id, report)
       time.sleep(3600)
@@ -234,9 +304,10 @@ def nightly_report_scheduler(chat_id):
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
   chat_id = message.chat.id
-  markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+  markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
   markup.add(
       types.KeyboardButton("وضعیت اتصال صرافی"),
+      types.KeyboardButton("موجودی حساب"),
       types.KeyboardButton("تحلیل لحظه‌ای بازار"),
       types.KeyboardButton("آمار معاملات امروز"),
   )
@@ -244,7 +315,7 @@ def send_welcome(message):
   success, conn_msg = test_xt_connection()
   if success:
     intro_msg = (
-        "ربات هوشمند با استراتژی سخت‌گیرانه و تایید حجم معاملات روشن شد!\n\n"
+        "ربات هوشمند کندل‌خوانی با دکمه موجودی حساب روشن شد!\n\n"
         f"{conn_msg}"
     )
   else:
@@ -266,13 +337,17 @@ def handle_messages(message):
   if message.text == "وضعیت اتصال صرافی":
     success, msg = test_xt_connection()
     bot.send_message(message.chat.id, f"{msg}" if success else f"{msg}")
+  elif message.text == "موجودی حساب":
+    balance_msg = get_account_balance_details()
+    bot.send_message(message.chat.id, balance_msg)
   elif message.text == "تحلیل لحظه‌ای بازار":
-    res = advanced_smart_market_analysis()
+    res = advanced_candlestick_and_market_analysis()
     if res["status"] == "success":
       bot.send_message(
           message.chat.id,
-          f"وضعیت کلیدی بازار:\nروند: {res['trend']}\nپیشنهاد:"
-          f" {res['action']}\nدلیل: {res['reason']}\nقیمت: {res['price']}",
+          f"وضعیت کلیدی بازار:\nالگوی کندل: {res['pattern']}\nروند:"
+          f" {res['trend']}\nپیشنهاد: {res['action']}\nدلیل: {res['reason']}\nقیمت:"
+          f" {res['price']}",
       )
     else:
       bot.send_message(
@@ -281,8 +356,8 @@ def handle_messages(message):
       )
   elif message.text == "آمار معاملات امروز":
     stats_msg = (
-        "آمار عملکرد محافظه‌کارانه:\n\n"
-        f"مجموع معاملات تاییدشده: {daily_stats['signals_opened']}\n"
+        "آمار عملکرد اتوماتیک کندل‌خوانی:\n\n"
+        f"مجموع معاملات: {daily_stats['signals_opened']}\n"
         f"موفق: {daily_stats['successful_trades']} | خطا:"
         f" {daily_stats['failed_trades']}"
     )
@@ -293,4 +368,4 @@ def handle_messages(message):
 
 if __name__ == "__main__":
   bot.infinity_polling()
-        
+          
