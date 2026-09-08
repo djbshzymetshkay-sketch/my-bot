@@ -28,13 +28,12 @@ def get_xt_signature(secret_key, message):
 
 def test_xt_connection():
     try:
-        path = "/future/user/v1/account/describe"
+        path = "/future/user/v1/balance/list"
         url = XT_BASE_URL + path
         timestamp = str(int(time.time() * 1000))
         
-        query_string = f"timestamp={timestamp}"
-        signature_payload = f"Y=#{path}#{query_string}"
-        signature = get_xt_signature(XT_SECRET_KEY, signature_payload)
+        sign_str = f"#{path}#"
+        signature = get_xt_signature(XT_SECRET_KEY, sign_str)
         
         headers = {
             "validate-appkey": XT_API_KEY,
@@ -43,11 +42,14 @@ def test_xt_connection():
             "Content-Type": "application/x-www-form-urlencoded"
         }
         
-        response = requests.get(f"{url}?{query_string}", headers=headers, timeout=10)
-        data = response.json()
+        response = requests.get(url, headers=headers, timeout=10)
+        try:
+            data = response.json()
+        except Exception:
+            return False, f"پاسخ خام غیرقابل پردازش: {response.text}"
         
         if response.status_code == 200 and data.get("returnCode") == 0:
-            return True, "اتصال به صرافی با موفقیت برقرار شد."
+            return True, "اتصال به حساب فیوچرز صرافی با موفقیت برقرار شد."
         else:
             return False, f"خطای صرافی: {data}"
     except Exception as e:
@@ -109,18 +111,15 @@ def advanced_smart_market_analysis():
             opens = [float(c['o']) for c in candles]
             current_price = closes[-1]
             
-            # تحلیل تخصصی الگوهای کندل‌خوانی (Candlestick Analysis)
             prev_close = closes[-2]
             prev_open = opens[-2]
             
-            # الگوی پوشای صعودی و نزولی (Bullish / Bearish Engulfing)
             is_bullish_engulfing = (prev_close < prev_open) and (closes[-1] > opens[-1]) and (closes[-1] >= prev_open) and (opens[-1] <= prev_close)
             is_bearish_engulfing = (prev_close > prev_open) and (closes[-1] < opens[-1]) and (closes[-1] <= prev_open) and (opens[-1] >= prev_close)
             
             sma_short = sum(closes[-5:]) / 5
             sma_long = sum(closes[-15:]) / 15
             
-            # سیستم یادگیری و حافظه تطبیقی از خطاهای گذشته
             recent_failures = [t for t in daily_stats["trades_history"][-4:] if not t["success"]]
             avoid_direction = None
             if len(recent_failures) >= 2:
@@ -185,7 +184,6 @@ def execute_auto_trade(chat_id):
                     if chat_id:
                         bot.send_message(chat_id, f"⚠️ **خطای صرافی (ثبت در حافظه تطبیقی):**\n{order_res['msg']}", parse_mode="Markdown")
             
-            # بررسی بازار هر 15 دقیقه برای دقت بالا در کندل‌خوانی
             time.sleep(900)
         except Exception as e:
             if chat_id:
@@ -251,4 +249,4 @@ def handle_messages(message):
 
 if __name__ == "__main__":
     bot.infinity_polling()
-                    
+                
