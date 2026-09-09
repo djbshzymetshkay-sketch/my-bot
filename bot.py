@@ -98,7 +98,7 @@ class MasterXTBot:
         return round(position_size, 4), leverage
 
     def execute_trade(self, signal, rationale, price):
-        """۵. ثبت معامله در صرافی و لاگ‌ها همراه با عیب‌یابی دقیق در صورت عدم باز شدن پوزیشن"""
+        """۵. ثبت واقعی معامله در صرافی و بررسی سخت‌گیرانه پاسخ صرافی برای جلوگیری از پیام صوری"""
         if not self.connection_status:
             error_msg = f"❌ صرافی متصل نشد! امکان باز کردن پوزیشن وجود ندارد. دلیل:\n{self.connection_msg}"
             logging.error(error_msg)
@@ -125,12 +125,20 @@ class MasterXTBot:
                 position_side=position_side
             )
 
-            if isinstance(order_res, dict) and order_res.get("rc", 0) != 0:
-                error_detail = f"❌ صرافی پوزیشن را باز نکرد!\nکد خطا: {order_res.get('rc')}\nدلیل صرافی: {order_res.get('msg', order_res)}"
+            # بررسی سخت‌گیرانه پاسخ صرافی
+            if isinstance(order_res, dict):
+                rc_code = order_res.get("rc", order_res.get("code", 0))
+                # اگر صرافی خطایی برگرداند یا کدی غیر از موفقیت بدهد، پیام صوری ارسال نمی‌شود
+                if rc_code != 0 and rc_code != "0" and rc_code != "SUCCESS":
+                    error_detail = f"❌ صرافی پوزیشن را رد کرد و سفارشی ثبت نشد!\nکد خطا: {rc_code}\nپیام صرافی: {order_res.get('msg', order_res)}"
+                    logging.error(error_detail)
+                    return error_detail
+            elif not order_res:
+                error_detail = "❌ صرافی پاسخی برای ثبت سفارش برنگرداند و پوزیشنی باز نشده است."
                 logging.error(error_detail)
                 return error_detail
 
-            success_msg = f"✅ معامله با موفقیت در صرافی ثبت و پوزیشن باز شد!\nجهت: {signal} | حجم: {amount} | قیمت: {price} | دلیل: {rationale}"
+            success_msg = f"✅ تایید قطعی صرافی: معامله واقعاً ثبت و پوزیشن باز شد!\nجهت: {signal} | حجم: {amount} | قیمت: {price} | دلیل: {rationale}"
             logging.info(success_msg)
             return success_msg
 
@@ -222,4 +230,4 @@ if __name__ == "__main__":
     else:
         bot_core = MasterXTBot()
         print(bot_core.connection_msg)
-        
+                
