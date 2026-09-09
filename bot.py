@@ -55,7 +55,7 @@ class MasterXTBot:
             return {'RSI': 0.5, 'Engulfing': 0.3, 'Hammer': 0.2}
 
     def analyze_market(self, df):
-        """۱. هسته تحلیل تکنیکال (فنی)"""
+        """۱. هسته تحلیل تکنیکال (فنی با بررسی سخت‌گیرانه الگوها)"""
         df.ta.rsi(length=14, append=True)
         
         # استفاده از روش ایمن برای الگوها جهت جلوگیری از خطای AttributeError
@@ -72,19 +72,22 @@ class MasterXTBot:
             df['Hammer'] = 0
         
         rsi_val = df['RSI_14'].iloc[-1]
+        engulfing_val = df['Engulfing'].iloc[-1]
+        hammer_val = df['Hammer'].iloc[-1]
         current_close = float(df['close'].iloc[-1])
         
         # سیستم امتیازدهی
         score = (rsi_val * self.weights['RSI']) + \
-                (abs(df['Engulfing'].iloc[-1]) * self.weights['Engulfing']) + \
-                (abs(df['Hammer'].iloc[-1]) * self.weights['Hammer'])
+                (abs(engulfing_val) * self.weights['Engulfing']) + \
+                (abs(hammer_val) * self.weights['Hammer'])
         
-        if rsi_val < 35:
-            return {"status": "success", "signal": "BUY", "price": current_close, "score": score, "rationale": "RSI Oversold + Patterns"}
-        elif rsi_val > 65:
-            return {"status": "success", "signal": "SELL", "price": current_close, "score": score, "rationale": "RSI Overbought + Patterns"}
+        # شرط سخت‌گیرانه: معامله تنها زمانی صادر می‌شود که هم RSI در محدوده باشد و هم الگوی کندل‌استیک تایید شود
+        if rsi_val < 35 and (engulfing_val != 0 or hammer_val != 0):
+            return {"status": "success", "signal": "BUY", "price": current_close, "score": score, "rationale": "RSI Oversold + Valid Candlestick Pattern"}
+        elif rsi_val > 65 and (engulfing_val != 0 or hammer_val != 0):
+            return {"status": "success", "signal": "SELL", "price": current_close, "score": score, "rationale": "RSI Overbought + Valid Candlestick Pattern"}
         
-        return {"status": "neutral", "score": score, "reason": f"بازار خنثی است (RSI: {round(rsi_val, 2)})، شرایط باز کردن پوزیشن برقرار نیست."}
+        return {"status": "neutral", "score": score, "reason": f"بازار فاقد الگوی تاییدیه است (RSI: {round(rsi_val, 2)})، پوزیشنی باز نمی‌شود."}
 
     def calculate_position_size(self, balance, risk_percent, stop_loss_dist):
         """۳. مدیریت ریسک (محاسبه خودکار حجم و اهرم)"""
