@@ -57,9 +57,19 @@ class MasterXTBot:
     def analyze_market(self, df):
         """۱. هسته تحلیل تکنیکال (فنی)"""
         df.ta.rsi(length=14, append=True)
-        # شناسایی الگوها
-        df['Engulfing'] = ta.cdl_engulfing(df['open'], df['high'], df['low'], df['close'])
-        df['Hammer'] = ta.cdl_hammer(df['open'], df['high'], df['low'], df['close'])
+        
+        # استفاده از روش ایمن برای الگوها جهت جلوگیری از خطای AttributeError
+        try:
+            engulfing_res = ta.cdl_pattern(df['open'], df['high'], df['low'], df['close'], name='engulfing')
+            df['Engulfing'] = engulfing_res.iloc[:, 0] if engulfing_res is not None else 0
+        except:
+            df['Engulfing'] = 0
+
+        try:
+            hammer_res = ta.cdl_pattern(df['open'], df['high'], df['low'], df['close'], name='hammer')
+            df['Hammer'] = hammer_res.iloc[:, 0] if hammer_res is not None else 0
+        except:
+            df['Hammer'] = 0
         
         rsi_val = df['RSI_14'].iloc[-1]
         current_close = float(df['close'].iloc[-1])
@@ -209,4 +219,4 @@ if __name__ == "__main__":
     else:
         bot_core = MasterXTBot()
         print(bot_core.connection_msg)
-    
+        
