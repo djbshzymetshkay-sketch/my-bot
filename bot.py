@@ -150,8 +150,8 @@ def execute_auto_trade(chat_id):
         tp = analysis["tp"]
         sl = analysis["sl"]
 
-        position_side = "1" if action == "BUY" else "2"
-        side = "1" if action == "BUY" else "2"
+        position_side = "LONG" if action == "BUY" else "SHORT"
+        order_side = "BUY" if action == "BUY" else "SELL"
         applied_leverage = 50
 
         try:
@@ -168,17 +168,16 @@ def execute_auto_trade(chat_id):
 
           # محاسبه اتوماتیک حجم معامله بر اساس سرمایه و اهرم ۵۰x
           total_power = available_balance * applied_leverage
-          volume = str(round(total_power / price, 4))
+          volume = round(total_power / price, 4)
 
-          order_res = xt_perp.submit_order(
+          # استفاده از متد استاندارد send_order در پکیج pyxt
+          order_res = xt_perp.send_order(
               symbol="btc_usdt",
-              orderType="1",
-              entrustType="1",
-              bizType="1",
-              positionSide=position_side,
-              side=side,
-              vol=volume,
-              leverage=str(applied_leverage),
+              price=price,
+              amount=volume,
+              order_side=order_side,
+              order_type="MARKET",
+              position_side=position_side,
           )
           success_order = True
           order_error = ""
