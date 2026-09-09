@@ -1,4 +1,7 @@
 pyxt
 requests
 pyTelegramBotAPI
+pandas
+pandas_ta
+
 
