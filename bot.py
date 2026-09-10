@@ -73,8 +73,6 @@ class MasterXTBot:
                 (abs(engulfing_val) * self.weights['Engulfing']) + \
                 (abs(hammer_val) * self.weights['Hammer'])
         
-        # اصلاح شرط‌ها برای اطمینان از اینکه الگوها به‌درستی ارزیابی می‌شوند
-        # (توجه: الگوهای کندل‌استیک در pandas_ta مقادیری غیر از صفر برمی‌گردانند وقتی تشکیل شوند)
         if rsi_val < 40 and engulfing_val != 0:
             return {"status": "success", "signal": "BUY", "price": current_close, "score": score, "rationale": "RSI Oversold + Engulfing Pattern"}
         elif rsi_val > 60 and engulfing_val != 0:
@@ -142,19 +140,20 @@ if bot:
         threading.Thread(target=run_bot_loop, args=(chat_id,), daemon=True).start()
 
 def run_bot_loop(target_chat_id):
-    bot_core = MasterXTBot()
     offline_start_time = None
     loop_counter = 0
 
     while True:
         try:
-            # اگر قبلا قطع بوده و الان وصل شده، مدت قطعی را حساب کن و بفرست
+            bot_core = MasterXTBot()
+            
+            # اگر اینترنت مجدداً وصل شد، زمان قطعی محاسبه و پیام ارسال می‌شود
             if offline_start_time is not None:
                 downtime_duration = (datetime.now() - offline_start_time).total_seconds() / 3600
                 hours = int(downtime_duration)
                 minutes = int((downtime_duration - hours) * 60)
                 if bot and target_chat_id:
-                    bot.send_message(target_chat_id, f"⚠️ اینترنت یا سرور مجدداً وصل شد!\nمدت زمان قطعی/خاموش بودن ربات: حدود {hours} ساعت و {minutes} دقیقه.")
+                    bot.send_message(target_chat_id, f"⚠️ اینترنت یا اتصال مجدداً برقرار شد!\nمدت زمان قطعی/خاموش بودن ربات: حدود {hours} ساعت و {minutes} دقیقه.")
                 offline_start_time = None
 
             url = "https://fapi.xt.com/future/market/v1/public/q/kline?symbol=btc_usdt&interval=15m&limit=30"
@@ -178,20 +177,20 @@ def run_bot_loop(target_chat_id):
                     if bot and target_chat_id:
                         bot.send_message(target_chat_id, result_msg)
                 else:
-                    # گزارش دوره‌ای هر ۱۰ دقیقه یک‌بار (هر حلقه ۶۰۰ ثانیه یعنی ۱۰ دقیقه)
                     loop_counter += 1
                     if loop_counter >= 1 and bot and target_chat_id:
-                        bot.send_message(target_chat_id, f"🔍 بررسی بازار (هر ۱۰ دقیقه):\n{analysis.get('reason')}\nوضعیت: ربات روشن و در حال رصد است.")
+                        bot.send_message(target_chat_id, f"🔍 بررسی بازار (هر ۱۰ دقیقه):\n{analysis.get('reason')}\nوضعیت: ربات روشن و فعال است.")
                         loop_counter = 0
 
+            # استراحت عادی ۱۰ دقیقه بین بررسی‌ها
+            time.sleep(600)
+
         except Exception as loop_err:
-            # اگر اینترنت قطع شود یا خطایی رخ دهد، زمان شروع قطعی ثبت می‌شود
             if offline_start_time is None:
                 offline_start_time = datetime.now()
-            logging.error(f"خطای ارتباطی: {str(loop_err)}")
-
-        # زمان استراحت بین هر بررسی (۶۰۰ ثانیه = ۱۰ دقیقه)
-        time.sleep(600)
+            logging.error(f"خطای ارتباطی یا قطعی: {str(loop_err)}")
+            # در زمان قطعی اینترنت، هر ۱ دقیقه تلاش می‌کند تا اتصال برگشت بخورد
+            time.sleep(60)
 
 if __name__ == "__main__":
     if bot:
@@ -200,4 +199,4 @@ if __name__ == "__main__":
     else:
         bot_core = MasterXTBot()
         print(bot_core.connection_msg)
-        
+                
