@@ -56,21 +56,33 @@ def run_bot_loop(chat_id):
     global is_bot_running
     bot_core = MasterXTBot()
     bot.send_message(chat_id, "⚙️ اسکنر فعال شد...")
+    
     while is_bot_running:
         for symbol in SYMBOLS:
             if not is_bot_running: break
             try:
+                # اصلاحیه: بررسی سلامت پاسخ قبل از پردازش
                 url = f"https://fapi.xt.com/future/market/v1/public/q/kline?symbol={symbol.replace('_', '')}&interval=15m&limit=50"
-                res = requests.get(url, timeout=10).json()
-                if "result" in res:
-                    df = pd.DataFrame([{"close": float(c["c"]), "volume": float(c["v"])} for c in res["result"]])
-                    analysis = bot_core.analyze_market(df)
-                    if analysis["status"] == "success":
-                        msg = bot_core.execute_trade(symbol, analysis["signal"], analysis["price"])
-                        bot.send_message(chat_id, msg)
+                response = requests.get(url, timeout=10)
+                
+                if response.status_code == 200:
+                    res = response.json()
+                    # بررسی اینکه result وجود دارد و خالی نیست
+                    if res and isinstance(res, dict) and "result" in res and res["result"]:
+                        candles = res["result"]
+                        df = pd.DataFrame([{"close": float(c["c"]), "volume": float(c["v"])} for c in candles])
+                        analysis = bot_core.analyze_market(df)
+                        if analysis["status"] == "success":
+                            msg = bot_core.execute_trade(symbol, analysis["signal"], analysis["price"])
+                            bot.send_message(chat_id, msg)
+                    else:
+                        logging.warning(f"داده نامعتبر برای {symbol}")
+                else:
+                    logging.warning(f"خطای صرافی برای {symbol}: {response.status_code}")
+                
                 time.sleep(2)
             except Exception as e:
-                logging.error(f"خطا در {symbol}: {e}")
+                logging.error(f"خطای غیرمنتظره در {symbol}: {e}")
         time.sleep(60)
 
 # --- مدیریت دستورات و دکمه‌ها ---
@@ -102,11 +114,14 @@ def callback_query(call):
     elif call.data == "check_logs":
         try:
             with open("bot_logs.log", "r") as f:
-                logs = f.readlines()[-10:] # ۵ خط آخر
-            bot.send_message(call.message.chat.id, "📜 **آخرین وضعیت لاگ‌ها:**\n" + "".join(logs))
+                logs = f.readlines()[-10:] # ۱۰ خط آخر
+            if logs:
+                bot.send_message(call.message.chat.id, "📜 **آخرین وضعیت لاگ‌ها:**\n" + "".join(logs))
+            else:
+                bot.send_message(call.message.chat.id, "فایل لاگ خالی است.")
         except:
             bot.send_message(call.message.chat.id, "فایل لاگی پیدا نشد.")
 
 if bot:
     bot.infinity_polling()
-                                    
+               
