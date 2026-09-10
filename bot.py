@@ -18,12 +18,10 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
 
 class MasterXTBot:
     def __init__(self):
-        # کلیدهای اختصاصی صرافی
         self.api_key = "11bfe446-a063-4ee0-8871-d7ecfd612db6"
         self.secret_key = "f4442716939deb0ff2415e88503d26fc663c2738"
         self.history_file = 'trade_history.json'
         
-        # راه‌اندازی ارتباط با صرافی XT و بررسی وضعیت اتصال
         try:
             self.xt_perp = Perp(host="https://fapi.xt.com", access_key=self.api_key, secret_key=self.secret_key)
             self.connection_status, self.connection_msg = self.test_connection()
@@ -31,12 +29,10 @@ class MasterXTBot:
             self.connection_status = False
             self.connection_msg = f"❌ خطای بحرانی در ساخت ماژول صرافی: {str(e)}"
 
-        # بارگذاری هوش مصنوعی و وزن‌ها
         self.weights = self.load_intelligence()
-        self.active_positions = {} # برای ردیابی پوزیشن‌های باز
+        self.active_positions = {}
 
     def test_connection(self):
-        """تست اتصال به صرافی و بررسی اعتبار حساب"""
         try:
             account_info = self.xt_perp.get_account_capital()
             if account_info:
@@ -46,7 +42,6 @@ class MasterXTBot:
             return False, f"❌ صرافی متصل نشد. دلیل خطا: {str(e)}"
 
     def load_intelligence(self):
-        """بارگذاری وزن استراتژی‌ها از فایل JSON"""
         try:
             with open(self.history_file, 'r') as f:
                 data = json.load(f)
@@ -55,10 +50,8 @@ class MasterXTBot:
             return {'RSI': 0.5, 'Engulfing': 0.3, 'Hammer': 0.2}
 
     def analyze_market(self, df):
-        """۱. هسته تحلیل تکنیکال (فنی با بررسی سخت‌گیرانه الگوها)"""
         df.ta.rsi(length=14, append=True)
         
-        # استفاده از روش ایمن برای الگوها جهت جلوگیری از خطای AttributeError
         try:
             engulfing_res = ta.cdl_pattern(df['open'], df['high'], df['low'], df['close'], name='engulfing')
             df['Engulfing'] = engulfing_res.iloc[:, 0] if engulfing_res is not None else 0
@@ -76,31 +69,33 @@ class MasterXTBot:
         hammer_val = df['Hammer'].iloc[-1]
         current_close = float(df['close'].iloc[-1])
         
-        # سیستم امتیازدهی
         score = (rsi_val * self.weights['RSI']) + \
                 (abs(engulfing_val) * self.weights['Engulfing']) + \
                 (abs(hammer_val) * self.weights['Hammer'])
         
-        # شرط سخت‌گیرانه: معامله تنها زمانی صادر می‌شود که هم RSI در محدوده باشد و هم الگوی کندل‌استیک تایید شود
-        if rsi_val < 35 and (engulfing_val != 0 or hammer_val != 0):
-            return {"status": "success", "signal": "BUY", "price": current_close, "score": score, "rationale": "RSI Oversold + Valid Candlestick Pattern"}
-        elif rsi_val > 65 and (engulfing_val != 0 or hammer_val != 0):
-            return {"status": "success", "signal": "SELL", "price": current_close, "score": score, "rationale": "RSI Overbought + Valid Candlestick Pattern"}
+        # اصلاح شرط‌ها برای اطمینان از اینکه الگوها به‌درستی ارزیابی می‌شوند
+        # (توجه: الگوهای کندل‌استیک در pandas_ta مقادیری غیر از صفر برمی‌گردانند وقتی تشکیل شوند)
+        if rsi_val < 40 and engulfing_val != 0:
+            return {"status": "success", "signal": "BUY", "price": current_close, "score": score, "rationale": "RSI Oversold + Engulfing Pattern"}
+        elif rsi_val > 60 and engulfing_val != 0:
+            return {"status": "success", "signal": "SELL", "price": current_close, "score": score, "rationale": "RSI Overbought + Engulfing Pattern"}
+        elif rsi_val < 40 and hammer_val != 0:
+            return {"status": "success", "signal": "BUY", "price": current_close, "score": score, "rationale": "RSI Oversold + Hammer Pattern"}
+        elif rsi_val > 60 and hammer_val != 0:
+            return {"status": "success", "signal": "SELL", "price": current_close, "score": score, "rationale": "RSI Overbought + Hammer Pattern"}
         
-        return {"status": "neutral", "score": score, "reason": f"بازار فاقد الگوی تاییدیه است (RSI: {round(rsi_val, 2)})، پوزیشنی باز نمی‌شود."}
+        return {"status": "neutral", "score": score, "reason": f"بازار فاقد الگوی تاییدیه است (RSI: {round(rsi_val, 2)}, Engulfing: {engulfing_val}, Hammer: {hammer_val})"}
 
     def calculate_position_size(self, balance, risk_percent, stop_loss_dist):
-        """۳. مدیریت ریسک (محاسبه خودکار حجم و اهرم)"""
         if stop_loss_dist <= 0:
             stop_loss_dist = 1.0
         position_size = (balance * risk_percent) / stop_loss_dist
-        leverage = 5 # اهرم پیش‌فرض
+        leverage = 5
         return round(position_size, 4), leverage
 
     def execute_trade(self, signal, rationale, price):
-        """۵. ثبت واقعی معامله در صرافی و بررسی سخت‌گیرانه پاسخ صرافی برای جلوگیری از پیام صوری"""
         if not self.connection_status:
-            error_msg = f"❌ صرافی متصل نشد! امکان باز کردن پوزیشن وجود ندارد. دلیل:\n{self.connection_msg}"
+            error_msg = f"❌ صرافی متصل نشد! امکان باز کردن پوزیشن وجود ندارد."
             logging.error(error_msg)
             return error_msg
 
@@ -125,73 +120,43 @@ class MasterXTBot:
                 position_side=position_side
             )
 
-            # بررسی سخت‌گیرانه پاسخ صرافی
             if isinstance(order_res, dict):
                 rc_code = order_res.get("rc", order_res.get("code", 0))
-                # اگر صرافی خطایی برگرداند یا کدی غیر از موفقیت بدهد، پیام صوری ارسال نمی‌شود
                 if rc_code != 0 and rc_code != "0" and rc_code != "SUCCESS":
-                    error_detail = f"❌ صرافی پوزیشن را رد کرد و سفارشی ثبت نشد!\nکد خطا: {rc_code}\nپیام صرافی: {order_res.get('msg', order_res)}"
-                    logging.error(error_detail)
-                    return error_detail
+                    return f"❌ صرافی پوزیشن را رد کرد:\n{order_res.get('msg', order_res)}"
             elif not order_res:
-                error_detail = "❌ صرافی پاسخی برای ثبت سفارش برنگرداند و پوزیشنی باز نشده است."
-                logging.error(error_detail)
-                return error_detail
+                return "❌ صرافی پاسخی برای ثبت سفارش برنگرداند."
 
-            success_msg = f"✅ تایید قطعی صرافی: معامله واقعاً ثبت و پوزیشن باز شد!\nجهت: {signal} | حجم: {amount} | قیمت: {price} | دلیل: {rationale}"
-            logging.info(success_msg)
-            return success_msg
+            return f"✅ معامله ثبت و پوزیشن باز شد!\nجهت: {signal} | حجم: {amount} | قیمت: {price} | دلیل: {rationale}"
 
         except Exception as e:
-            error_detail = f"❌ خطای صرافی هنگام باز کردن پوزیشن:\n{str(e)}"
-            logging.error(error_detail)
-            return error_detail
-
-    def manage_position(self, symbol, current_price, entry_price, tp1):
-        """۴. مدیریت پوزیشن (خروج پله‌ای و Risk-Free)"""
-        if symbol in self.active_positions:
-            if current_price >= tp1:
-                print(f"TP1 تاچ شد! انتقال استاپ‌لاس به قیمت ورود ({entry_price}) برای {symbol}")
-                return True
-        return False
-
-    def update_intelligence(self, trade_result):
-        """۲. سیستم یادگیری (به‌روزرسانی وزن استراتژی‌ها)"""
-        if trade_result['profit'] > 0:
-            self.weights['RSI'] += 0.05
-            with open(self.history_file, 'w') as f:
-                json.dump({'weights': self.weights}, f)
-            print("هوش مصنوعی: وزن استراتژی‌ها بر اساس ترید موفق به‌روز شد.")
-
-    def daily_report(self):
-        """۵. گزارش‌دهی اتوماتیک رأس ساعت ۸"""
-        if datetime.now().hour == 8:
-            print("گزارش روزانه: همه سیستم‌ها پایدار، PnL امروز مثبت.")
+            return f"❌ خطای صرافی هنگام باز کردن پوزیشن:\n{str(e)}"
 
 if bot:
     @bot.message_handler(commands=['start'])
     def send_welcome(message):
         chat_id = message.chat.id
         bot_instance = MasterXTBot()
-        msg = f"🤖 ربات شما استارت شد.\n\nوضعیت اتصال صرافی:\n{bot_instance.connection_msg}"
+        msg = f"🤖 ربات شما استارت شد و فعال است.\n\nوضعیت اتصال صرافی:\n{bot_instance.connection_msg}"
         bot.send_message(chat_id, msg)
         threading.Thread(target=run_bot_loop, args=(chat_id,), daemon=True).start()
 
-    @bot.message_handler(func=lambda message: True)
-    def handle_messages(message):
-        bot_instance = MasterXTBot()
-        if message.text == "وضعیت صرافی":
-            bot.send_message(message.chat.id, bot_instance.connection_msg)
-        else:
-            bot.send_message(message.chat.id, "ربات در حال رصد بازار است. هرگونه خطا یا مشکل در اتصال یا ثبت سفارش مستقیماً به شما اعلام می‌شود.")
-
 def run_bot_loop(target_chat_id):
     bot_core = MasterXTBot()
-    if not bot_core.connection_status and bot:
-        bot.send_message(target_chat_id, f"⚠️ اخطار اتصال: ربات به صرافی متصل نشد!\nدلیل: {bot_core.connection_msg}")
+    offline_start_time = None
+    loop_counter = 0
 
     while True:
         try:
+            # اگر قبلا قطع بوده و الان وصل شده، مدت قطعی را حساب کن و بفرست
+            if offline_start_time is not None:
+                downtime_duration = (datetime.now() - offline_start_time).total_seconds() / 3600
+                hours = int(downtime_duration)
+                minutes = int((downtime_duration - hours) * 60)
+                if bot and target_chat_id:
+                    bot.send_message(target_chat_id, f"⚠️ اینترنت یا سرور مجدداً وصل شد!\nمدت زمان قطعی/خاموش بودن ربات: حدود {hours} ساعت و {minutes} دقیقه.")
+                offline_start_time = None
+
             url = "https://fapi.xt.com/future/market/v1/public/q/kline?symbol=btc_usdt&interval=15m&limit=30"
             response = requests.get(url, timeout=10)
             data = response.json()
@@ -213,15 +178,20 @@ def run_bot_loop(target_chat_id):
                     if bot and target_chat_id:
                         bot.send_message(target_chat_id, result_msg)
                 else:
-                    logging.info(analysis.get("reason", "پوزیشنی باز نشد."))
+                    # گزارش دوره‌ای هر ۱۰ دقیقه یک‌بار (هر حلقه ۶۰۰ ثانیه یعنی ۱۰ دقیقه)
+                    loop_counter += 1
+                    if loop_counter >= 1 and bot and target_chat_id:
+                        bot.send_message(target_chat_id, f"🔍 بررسی بازار (هر ۱۰ دقیقه):\n{analysis.get('reason')}\nوضعیت: ربات روشن و در حال رصد است.")
+                        loop_counter = 0
 
         except Exception as loop_err:
-            err_msg = f"⚠️ خطا در حلقه پردازش بازار:\n{str(loop_err)}"
-            logging.error(err_msg)
-            if bot and target_chat_id:
-                bot.send_message(target_chat_id, err_msg)
+            # اگر اینترنت قطع شود یا خطایی رخ دهد، زمان شروع قطعی ثبت می‌شود
+            if offline_start_time is None:
+                offline_start_time = datetime.now()
+            logging.error(f"خطای ارتباطی: {str(loop_err)}")
 
-        time.sleep(900)
+        # زمان استراحت بین هر بررسی (۶۰۰ ثانیه = ۱۰ دقیقه)
+        time.sleep(600)
 
 if __name__ == "__main__":
     if bot:
@@ -230,4 +200,4 @@ if __name__ == "__main__":
     else:
         bot_core = MasterXTBot()
         print(bot_core.connection_msg)
-                
+        
