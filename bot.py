@@ -10,12 +10,11 @@ from telebot import types
 from pyxt.perp import Perp
 
 # --- پیکربندی اصلی ---
-# کلیدهای API از Screenshot_۲۰۲۶۰۹۰۹-۲۲۵۸۳۱-(2).png استخراج شد
 API_KEY = "92d10f20b77a4349a32074d164745b78"
 SECRET_KEY = "d970d5a065974317b35c6f2e3d4e3f9b"
 
-TELEGRAM_TOKEN = "6941932204:AAElGfD1eC2y1k_Wc8qSsfz4nQcMhJmQ_9k"  # حتما جایگزین کن
-CHAT_ID = "5862121424"          # حتما جایگزین کن
+TELEGRAM_TOKEN = "6941932204:AAElGfD1eC2y1k_Wc8qSsfz4nQcMhJmQ_9k"
+CHAT_ID = "5862121424"
 
 SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt", "ada_usdt", 
            "avax_usdt", "link_usdt", "near_usdt", "dot_usdt", "ltc_usdt", "uni_usdt", "matic_usdt", 
@@ -62,45 +61,35 @@ active_positions = {} # {symbol: {details}}
 class MasterXTBot:
     def get_data(self, symbol):
         try:
-            # فرض بر این است که متد get_kline مقدار DataFrame برمی‌گرداند
             df = xt.get_kline(symbol, interval='15m', limit=200) 
             return pd.DataFrame(df)
         except: return None
 
     def analyze(self, df):
-        # ۱- EMA 200
         df.ta.ema(length=200, append=True)
-        # ۲- Bollinger Bands
-        df.ta.bbands(length=20, append=True)
-        # ۳- Volume Check
+        df.ta.bbands(length=20, append=True) 
         avg_vol = df['volume'].rolling(window=20).mean()
         
         last = df.iloc[-1]
-        prev = df.iloc[-2]
         
-        # منطق سیگنال دهی
         signal = None
         reason = ""
         
         if last['close'] > last['EMA_200'] and last['volume'] > avg_vol.iloc[-1]:
-            if last['close'] < last['BBL_20_2.0']: # قیمت در باند پایین بولینگر (احتمال بازگشت)
+            if last['close'] < last['BBL_20_2.0']:
                 signal = "BUY"
                 reason = "EMA200 Trend + High Vol + BB Bottom"
         
         return signal, reason
 
     def execute_trade(self, symbol, reason, price):
-        # محاسبه سرمایه درگیر (مثلاً ۱۰ درصد موجودی)
-        balance = xt.get_balance() # فرض بر داشتن این متد
+        balance = xt.get_balance() 
         trade_amount = balance * state['capital_percent']
         
         tp1 = price * 1.02
         tp2 = price * 1.04
         tp3 = price * 1.06
         sl = price * 0.98
-        
-        # باز کردن پوزیشن در XT (فرضی)
-        # xt.place_order(symbol, side="BUY", amount=trade_amount, leverage=state['leverage'])
         
         pos_info = {
             "entry": price, "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl,
@@ -126,12 +115,10 @@ def scheduler_task():
     while True:
         now = datetime.datetime.now()
         
-        # گزارش ۳ ساعته (Heartbeat)
         if (now - last_heartbeat).total_seconds() >= 10800:
             bot.send_message(CHAT_ID, "💓 Heartbeat: ربات فعال است و در حال تحلیل بازار است...")
             last_heartbeat = now
             
-        # گزارش روزانه ساعت ۸ صبح
         if now.hour == 8 and now.minute == 0:
             bot.send_message(CHAT_ID, f"📅 **گزارش روزانه:**\nتعداد معاملات: {state['daily_stats']['trades']}\nمجموع سود/زیان: {state['daily_stats']['pnl']}")
             state['daily_stats'] = {"trades": 0, "pnl": 0.0}
@@ -148,7 +135,7 @@ def trading_loop():
                     signal, reason = engine.analyze(df)
                     if signal == "BUY" and symbol not in active_positions:
                         engine.execute_trade(symbol, reason, df.iloc[-1]['close'])
-                time.sleep(3) # جلوگیری از محدودیت API
+                time.sleep(3)
         time.sleep(10)
 
 # --- پنل تلگرام ---
@@ -168,9 +155,9 @@ def start(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
+    global is_bot_running
     if call.data == "run":
         if state['last_stop_time']:
-            # diff = state['last_stop_time'] - datetime.datetime.now() # (ساده شده برای نمایش)
             bot.answer_callback_query(call.id, "خوش آمدی! مدتی خاموش بودیم.")
         state['running'] = True
         bot.edit_message_text("✅ ربات در حال اجراست...", call.message.chat.id, call.message.message_id)
@@ -181,17 +168,15 @@ def handle_query(call):
         bot.answer_callback_query(call.id, "🛑 معاملات متوقف شد.")
 
     elif call.data == "risk_cfg":
-        # در اینجا برای سادگی، یک پیام با قابلیت دریافت متن می‌فرستیم
         bot.send_message(call.message.chat.id, "لطفاً تنظیمات را به این صورت بفرستید:\n`percent,leverage`\nمثال: `0.1,10`")
 
     elif call.data == "pos_view":
         if not active_positions:
-            bot.send_message(call.message.chat.id, "❌ هیچ پوزیشن بازتری وجود ندارد.")
+            bot.send_message(call.message.chat.id, "❌ هیچ پوزیشن بازی وجود ندارد.")
         else:
             for sym, p in active_positions.items():
                 bot.send_message(call.message.chat.id, f"🪙 {sym}\n📍 ورود: {p['entry']}\n🎯 TP1: {p['tp1']}")
 
-# دریافت تنظیمات ریسک از کاربر
 @bot.message_handler(func=lambda m: "," in m.text)
 def set_risk(message):
     try:
@@ -208,5 +193,5 @@ threading.Thread(target=trading_loop, daemon=True).start()
 
 if __name__ == "__main__":
     print("MasterXTBot is launching...")
-    bot.polling(none_stop=True)
-           
+    bot.infinity_polling()
+               
