@@ -23,27 +23,6 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 
-# --- تابع اصلاح شده برای مدیریت ایمن موجودی ---
-def get_safe_balance():
-    try:
-        acc = xt.get_account_capital()
-        if isinstance(acc, dict):
-            if acc.get('returnCode') != 0:
-                return 0.0
-            result = acc.get('result', {})
-            if isinstance(result, list):
-                for item in result:
-                    if item.get('asset') == 'USDT' or item.get('currency') == 'USDT':
-                        return float(item.get('free', 0))
-            return 0.0
-        elif isinstance(acc, list):
-            for item in acc:
-                if item.get('asset') == 'USDT' or item.get('currency') == 'USDT':
-                    return float(item.get('free', 0))
-        return 0.0
-    except Exception as e:
-        return 0.0
-
 # --- سیستم مغز هوشمند ---
 class Brain:
     def __init__(self):
@@ -55,6 +34,11 @@ class Brain:
         return {"win_rate": 0.5, "total_trades": 0}
     def save(self):
         with open(self.file, 'w') as f: json.dump(self.data, f)
+    def learn(self, success):
+        self.data['total_trades'] += 1
+        factor = 1 if success else 0
+        self.data['win_rate'] = (self.data['win_rate'] * (self.data['total_trades']-1) + factor) / self.data['total_trades']
+        self.save()
 
 brain = Brain()
 active_positions = {}
@@ -79,35 +63,50 @@ class MasterXTBot:
         avg_vol = df['volume'].rolling(window=20).mean()
         last = df.iloc[-1]
         
+        # استراتژی: قیمت بالای EMA200 + حجم بالا + لمس باند پایین (BB)
         if last['close'] > last['EMA_200'] and last['volume'] > avg_vol.iloc[-1] and last['close'] < last['BBL_20_2.0']:
             return "BUY", "EMA200 Trend + High Vol + BB Bottom"
         return None, ""
 
     def execute_trade(self, symbol, reason, price):
         try:
-            balance = get_safe_balance()
-            if balance <= 0: return
+            # دریافت موجودی با متد جدید
+            acc = xt.get_account_capital()
+            balance = float(acc.get('usdt', 0))
+            
+            # محاسبات
             capital_in_trade = balance * state['capital_percent']
             tp1 = price * 1.01
             tp2 = price * 1.02
             tp3 = price * 1.03
             sl = price * 0.98
             
+            # ثبت در دیکشنری
             active_positions[symbol] = {"entry": price, "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl}
             state['daily_stats']['trades'] += 1
             
-            msg = (f"🚀 پوزیشن جدید: {symbol}\n💰 قیمت ورود: {price}\n🎯 TP1: {tp1:.4f} | TP2: {tp2:.4f} | TP3: {tp3:.4f}\n🛑 حد ضرر: {sl:.4f}\n📊 سرمایه درگیر: {capital_in_trade:.2f} USDT\n⚡️ اهرم: {state['leverage']}x\n🧠 دلیل: {reason}")
+            # پیام تلگرام
+            msg = (f"🚀 پوزیشن جدید: {symbol}\n"
+                   f"💰 قیمت ورود: {price}\n"
+                   f"🎯 TP1: {tp1:.4f} | TP2: {tp2:.4f} | TP3: {tp3:.4f}\n"
+                   f"🛑 حد ضرر: {sl:.4f}\n"
+                   f"📊 سرمایه درگیر: {capital_in_trade:.2f} USDT\n"
+                   f"⚡️ اهرم: {state['leverage']}x\n"
+                   f"🧠 دلیل: {reason}")
             bot.send_message(CHAT_ID, msg)
         except Exception as e:
             bot.send_message(CHAT_ID, f"❌ خطای ثبت ترید {symbol}: {e}")
 
+# --- وظایف زمان‌بندی شده ---
 def scheduler_task():
     last_heartbeat = datetime.datetime.now()
     while True:
         now = datetime.datetime.now()
+        # گزارش ۳ ساعته (Heartbeat)
         if (now - last_heartbeat).total_seconds() >= 10800:
-            bot.send_message(CHAT_ID, "💓 ربات زنده است...")
+            bot.send_message(CHAT_ID, "💓 ربات زنده است و در حال تحلیل بازار...")
             last_heartbeat = now
+        # گزارش ۸ صبح
         if now.hour == 8 and now.minute == 0:
             bot.send_message(CHAT_ID, f"📅 گزارش روزانه: {state['daily_stats']}")
             state['daily_stats'] = {"trades": 0, "pnl": 0.0}
@@ -126,32 +125,45 @@ def trading_loop():
                 time.sleep(2)
         time.sleep(10)
 
+# --- تلگرام ---
 @bot.message_handler(commands=['start'])
 def start(message):
+    # پیام بازگشت بعد از خاموشی
+    if state['last_stop_time']:
+        downtime = datetime.datetime.now() - state['last_stop_time']
+        bot.send_message(CHAT_ID, f"👋 بازگشت بخیر! ربات برای {downtime} خاموش بود.")
+    
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
         types.InlineKeyboardButton("▶️ شروع", callback_data="run"),
         types.InlineKeyboardButton("🛑 توقف", callback_data="stop"),
+        types.InlineKeyboardButton("⚙️ ریسک", callback_data="risk"),
+        types.InlineKeyboardButton("💰 سود/زیان", callback_data="pnl"),
+        types.InlineKeyboardButton("📊 پوزیشن‌ها", callback_data="pos"),
         types.InlineKeyboardButton("🔍 موجودی", callback_data="bal")
     )
-    bot.send_message(message.chat.id, "🤖 MasterXTBot:", reply_markup=markup)
+    bot.send_message(message.chat.id, "🤖 MasterXTBot پنل کنترل:", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     if call.data == "run":
         state['running'] = True
-        bot.answer_callback_query(call.id, "✅ شروع شد.")
+        bot.answer_callback_query(call.id, "✅ ربات شروع شد.")
     elif call.data == "stop":
         state['running'] = False
+        state['last_stop_time'] = datetime.datetime.now()
         bot.answer_callback_query(call.id, "🛑 متوقف شد.")
     elif call.data == "bal":
-        balance = get_safe_balance()
-        bot.send_message(call.message.chat.id, f"💰 موجودی فعلی: {balance} USDT")
+        try:
+            acc = xt.get_account_capital()
+            bot.send_message(call.message.chat.id, f"💰 موجودی: {acc.get('usdt', 0)} USDT")
+        except: bot.send_message(call.message.chat.id, "خطا در دریافت موجودی.")
+    # (سایر بخش‌های مدیریت دکمه‌ها را اینجا اضافه کن)
 
+# اجرای تردها
 threading.Thread(target=scheduler_task, daemon=True).start()
 threading.Thread(target=trading_loop, daemon=True).start()
 
 if __name__ == "__main__":
-    bot.remove_webhook()
-    bot.polling(none_stop=True, interval=1, timeout=20)
-           
+    bot.polling(none_stop=True)
+               
