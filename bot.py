@@ -24,10 +24,9 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 
-# --- کد اضافه شده برای دیباگ ---
+# --- کد دیباگ ---
 print("DEBUG: Available methods in xt object:")
 print(dir(xt))
-# ------------------------------
 
 # --- مدیریت حافظه و هوش مصنوعی ---
 class Brain:
@@ -76,43 +75,6 @@ class MasterXTBot:
         avg_vol = df['volume'].rolling(window=20).mean()
         
         last = df.iloc[-1]
-        
-        signal = None
-        reason = ""
-        
-        if last['close'] > last['EMA_200'] and last['volume'] > avg_vol.iloc[-1]:
-            if last['close'] < last['total_trades']-1) + 1) / self.data['total_trades']
-        else: self.data['win_rate'] = (self.data['win_rate'] * (self.data['total_trades']-1)) / self.data['total_trades']
-        self.save()
-
-brain = Brain()
-
-# --- متغیرهای وضعیت ---
-state = {
-    "running": False,
-    "capital_percent": 0.1,  
-    "leverage": 10,          
-    "last_stop_time": None,
-    "daily_stats": {"trades": 0, "pnl": 0.0},
-    "start_time": datetime.datetime.now()
-}
-active_positions = {} 
-
-# --- هسته تحلیل و ترید ---
-class MasterXTBot:
-    def get_data(self, symbol):
-        try:
-            df = xt.get_kline(symbol, interval='15m', limit=200) 
-            return pd.DataFrame(df)
-        except: return None
-
-    def analyze(self, df):
-        df.ta.ema(length=200, append=True)
-        df.ta.bbands(length=20, append=True)
-        avg_vol = df['volume'].rolling(window=20).mean()
-        
-        last = df.iloc[-1]
-        
         signal = None
         reason = ""
         
@@ -120,22 +82,28 @@ class MasterXTBot:
             if last['close'] < last['BBL_20_2.0']: 
                 signal = "BUY"
                 reason = "EMA200 Trend + High Vol + BB Bottom"
-        
         return signal, reason
 
     def execute_trade(self, symbol, reason, price):
-        balance = xt.get_balance() 
-        trade_amount = balance * state['capital_percent']
-datetime.now()
+        # این متد نیاز به متد صحیح دریافت موجودی دارد (پس از مشاهده دیباگ اصلاح می‌شود)
+        try:
+            balance = xt.get_balance() 
+            trade_amount = balance * state['capital_percent']
+        except:
+            trade_amount = 10 
         
-        if (now - last_heartbeat).total_seconds() >= 10800:
-            bot.send_message(CHAT_ID, "💓 Heartbeat: ربات فعال است و در حال تحلیل بازار است...")
-            last_heartbeat = now
-            
-        if now.hour == 8 and now.minute == 0:
-            bot.send_message(CHAT_ID, f"📅 **گزارش روزانه:**\nتعداد معاملات: {state['daily_stats']['trades']}\nمجموع سود/زیان: {state['daily_stats']['pnl']}")
-            state['daily_stats'] = {"trades": 0, "pnl": 0.0}
+        pos_info = {"entry": price, "reason": reason, "tp1": price * 1.02}
+        active_positions[symbol] = pos_info
+        bot.send_message(CHAT_ID, f"🚀 پوزیشن {symbol} باز شد.")
 
+# --- وظایف زمان‌بندی شده ---
+def scheduler_task():
+    last_heartbeat = datetime.datetime.now()
+    while True:
+        now = datetime.datetime.now()
+        if (now - last_heartbeat).total_seconds() >= 10800:
+            bot.send_message(CHAT_ID, "💓 Heartbeat: ربات فعال است...")
+            last_heartbeat = now
         time.sleep(60)
 
 def trading_loop():
@@ -159,65 +127,29 @@ def start(message):
         types.InlineKeyboardButton("▶️ شروع ربات", callback_data="run"),
         types.InlineKeyboardButton("🛑 توقف معاملات", callback_data="stop"),
         types.InlineKeyboardButton("⚙️ تنظیمات ریسک", callback_data="risk_cfg"),
-        types.InlineKeyboardButton("💰 سود و زیان", callback_data="pnl_view"),
-        types.InlineKeyboardButton("📊 پوزیشن‌های باز", callback_data="pos_view"),
-        types.InlineKeyboardButton("📝 لاگ‌ها", callback_data="logs"),
         types.InlineKeyboardButton("🔍 موجودی", callback_data="balance")
     )
     bot.send_message(message.chat.id, "🤖 **MasterXTBot Control Panel**", reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
-    bot.answer_callback_query(call.id)
     if call.data == "run":
-        if state['last_stop_time']:
-            bot.answer_callback_query(call.id, "خوش آمدی! مدتی خاموش بودیم.")
         state['running'] = True
-        bot.edit_message_text("✅ ربات در حال اجراست...", call.message.chat.id, call.message.message_id)
-    
+        bot.answer_callback_query(call.id, "✅ ربات شروع شد.")
     elif call.data == "stop":
         state['running'] = False
-        state['last_stop_time'] = datetime.datetime.now()
-        bot.answer_callback_query(call.id, "🛑 معاملات متوقف شد.")
-
-    elif call.data == "risk_cfg":
-        bot.send_message(call.message.chat.id, "لطفاً تنظیمات را به این صورت بفرستید:\n`percent,leverage`\nمثال: `0.1,10`")
-
-    elif call.data == "pos_view":
-        if not active_positions:
-            bot.send_message(call.message.chat.id, "❌ هیچ پوزیشن بازتری وجود ندارد.")
-        else:
-            for sym, p in active_positions.items():
-                bot.send_message(call.message.chat.id, f"🪙 {sym}\n📍 ورود: {p['entry']}\n🎯 TP1: {p['tp1']}")
-                
-    elif call.data == "pnl_view":
-        bot.send_message(call.message.chat.id, f"📊 مجموع سود/زیان فعلی: {state['daily_stats']['pnl']}")
-
-    elif call.data == "logs":
-        bot.send_message(call.message.chat.id, "📝 لاگ‌ها:\nسیستم در حال حاضر بدون خطا در حال تحلیل است...")
-
+        bot.answer_callback_query(call.id, "🛑 متوقف شد.")
     elif call.data == "balance":
         try:
             bal = xt.get_balance()
-            bot.send_message(call.message.chat.id, f"💰 موجودی فعلی حساب شما: {bal} USDT")
+            bot.send_message(call.message.chat.id, f"💰 موجودی: {bal}")
         except Exception as e:
-            bot.send_message(call.message.chat.id, f"⚠️ خطای فنی:\n`{str(e)}`")
-
-@bot.message_handler(func=lambda m: "," in m.text)
-def set_risk(message):
-    try:
-        p, l = map(float, message.text.split(","))
-        state['capital_percent'] = p
-        state['leverage'] = int(l)
-        bot.reply_to(message, f"✅ تنظیم شد: {p*100}% سرمایه و {l}x اهرم.")
-    except:
-        bot.reply_to(message, "❌ فرمت اشتباه است. مثال: 0.1,10")
+            bot.send_message(call.message.chat.id, f"⚠️ خطا: {str(e)}")
 
 # --- اجرای اصلی ---
-threading.Thread(target=scheduler_task, daemon=True).start()
-threading.Thread(target=trading_loop, daemon=True).start()
-
 if __name__ == "__main__":
+    threading.Thread(target=scheduler_task, daemon=True).start()
+    threading.Thread(target=trading_loop, daemon=True).start()
     print("MasterXTBot is launching...")
     bot.polling(none_stop=True)
            
