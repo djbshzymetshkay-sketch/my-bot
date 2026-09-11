@@ -23,6 +23,22 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 
+# --- تابع کمکی برای جلوگیری از کرش کردن (مهم) ---
+def get_safe_balance():
+    try:
+        acc = xt.get_account_capital()
+        # چاپ لاگ برای دیباگ در Railway
+        print(f"DEBUG: API_RESPONSE: {acc}")
+        
+        if isinstance(acc, dict):
+            # امتحان کردن کلیدهای مختلف برای پیدا کردن موجودی
+            val = acc.get('usdt') or acc.get('balance') or acc.get('free') or 0
+            return float(val)
+        return float(acc)
+    except Exception as e:
+        print(f"DEBUG: ERROR_GETTING_BALANCE: {e}")
+        return 0.0
+
 # --- سیستم مغز هوشمند ---
 class Brain:
     def __init__(self):
@@ -70,10 +86,13 @@ class MasterXTBot:
 
     def execute_trade(self, symbol, reason, price):
         try:
-            # دریافت موجودی با متد جدید
-            acc = xt.get_account_capital()
-            balance = float(acc.get('usdt', 0))
+            # استفاده از تابع امن برای دریافت موجودی
+            balance = get_safe_balance()
             
+            if balance <= 0:
+                print(f"⚠️ ترید انجام نشد: موجودی صفر یا نامعتبر است ({balance})")
+                return
+
             # محاسبات
             capital_in_trade = balance * state['capital_percent']
             tp1 = price * 1.01
@@ -94,19 +113,22 @@ class MasterXTBot:
                    f"⚡️ اهرم: {state['leverage']}x\n"
                    f"🧠 دلیل: {reason}")
             bot.send_message(CHAT_ID, msg)
+            
+            # نکته: اینجا باید دستور واقعی خرید به صرافی ارسال شود (مثلاً xt.send_order)
+            # اگر متد ارسال دستور را داری، اینجا اضافه کن.
+            
         except Exception as e:
             bot.send_message(CHAT_ID, f"❌ خطای ثبت ترید {symbol}: {e}")
+            print(f"CRITICAL ERROR in execute_trade: {e}")
 
 # --- وظایف زمان‌بندی شده ---
 def scheduler_task():
     last_heartbeat = datetime.datetime.now()
     while True:
         now = datetime.datetime.now()
-        # گزارش ۳ ساعته (Heartbeat)
         if (now - last_heartbeat).total_seconds() >= 10800:
             bot.send_message(CHAT_ID, "💓 ربات زنده است و در حال تحلیل بازار...")
             last_heartbeat = now
-        # گزارش ۸ صبح
         if now.hour == 8 and now.minute == 0:
             bot.send_message(CHAT_ID, f"📅 گزارش روزانه: {state['daily_stats']}")
             state['daily_stats'] = {"trades": 0, "pnl": 0.0}
@@ -128,7 +150,6 @@ def trading_loop():
 # --- تلگرام ---
 @bot.message_handler(commands=['start'])
 def start(message):
-    # پیام بازگشت بعد از خاموشی
     if state['last_stop_time']:
         downtime = datetime.datetime.now() - state['last_stop_time']
         bot.send_message(CHAT_ID, f"👋 بازگشت بخیر! ربات برای {downtime} خاموش بود.")
@@ -154,11 +175,12 @@ def handle_query(call):
         state['last_stop_time'] = datetime.datetime.now()
         bot.answer_callback_query(call.id, "🛑 متوقف شد.")
     elif call.data == "bal":
-        try:
-            acc = xt.get_account_capital()
-            bot.send_message(call.message.chat.id, f"💰 موجودی: {acc.get('usdt', 0)} USDT")
-        except: bot.send_message(call.message.chat.id, "خطا در دریافت موجودی.")
-    # (سایر بخش‌های مدیریت دکمه‌ها را اینجا اضافه کن)
+        # استفاده از تابع امن برای دکمه موجودی
+        balance = get_safe_balance()
+        bot.send_message(call.message.chat.id, f"💰 موجودی فعلی: {balance} USDT")
+    # سایر دکمه‌ها (فعلاً خالی گذاشته شده تا کرش نکند)
+    elif call.data in ["risk", "pnl", "pos"]:
+        bot.answer_callback_query(call.id, "این ویژگی در حال توسعه است.")
 
 # اجرای تردها
 threading.Thread(target=scheduler_task, daemon=True).start()
@@ -166,4 +188,4 @@ threading.Thread(target=trading_loop, daemon=True).start()
 
 if __name__ == "__main__":
     bot.polling(none_stop=True)
-                
+                  
