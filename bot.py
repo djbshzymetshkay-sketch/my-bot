@@ -23,25 +23,37 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 
-# --- تابع کمکی برای خواندن امن موجودی (به‌روز شده) ---
+# --- تابع اصلاح‌شده برای دریافت موجودی ---
 def get_safe_balance():
     try:
         acc = xt.get_account_capital()
         print("DEBUG ACCOUNT CAPITAL RESPONSE:", acc, type(acc))
+        
+        # اگر پاسخ به شکل تپل یا لیست بود
         if isinstance(acc, tuple):
             acc = acc[0]
         if isinstance(acc, list) and len(acc) > 0:
             acc = acc[0]
+            
+        # اگر دیکشنری بود بررسی کن
         if isinstance(acc, dict):
             for key in ['usdt', 'free', 'availableBalance', 'balance', 'equity', 'available', 'amount']:
                 if key in acc and acc[key] is not None:
                     val = float(acc[key])
                     if val > 0:
                         return val
-        return 100.0
+        
+        # اگر ساختار به صورت شیء (Object) بود
+        for attr in ['usdt', 'free', 'availableBalance', 'balance', 'equity', 'available']:
+            if hasattr(acc, attr):
+                val = float(getattr(acc, attr) or 0)
+                if val > 0:
+                    return val
+                    
+        return 0.0
     except Exception as e:
         print(f"Error fetching balance: {e}")
-        return 100.0
+        return 0.0
 
 # --- سیستم مغز هوشمند ---
 class Brain:
@@ -95,6 +107,9 @@ class MasterXTBot:
                 pass
 
             balance = get_safe_balance()
+            if balance <= 0:
+                balance = 100.0  # مقدار پیش‌فرض ایمن جهت تست
+                
             capital_in_trade = balance * state['capital_percent']
             quantity = (capital_in_trade * state['leverage']) / price
             
@@ -202,5 +217,5 @@ threading.Thread(target=scheduler_task, daemon=True).start()
 threading.Thread(target=trading_loop, daemon=True).start()
 
 if __name__ == "__main__":
-    bot.polling(none_stop=True)
-               
+    bot.infinity_polling()
+                   
