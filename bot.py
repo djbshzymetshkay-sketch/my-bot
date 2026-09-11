@@ -23,6 +23,20 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 
+# --- تابع کمکی برای خواندن امن موجودی ---
+def get_safe_balance():
+    try:
+        acc = xt.get_account_capital()
+        # اگر خروجی تپل باشد، معمولاً داده اصلی در خانه اول آن قرار دارد
+        if isinstance(acc, tuple):
+            acc = acc[0]
+        if isinstance(acc, dict):
+            return float(acc.get('usdt', 0) or acc.get('free', 0) or acc.get('availableBalance', 0) or 0)
+        return 0.0
+    except Exception as e:
+        print(f"Error fetching balance: {e}")
+        return 0.0
+
 # --- سیستم مغز هوشمند ---
 class Brain:
     def __init__(self):
@@ -74,10 +88,9 @@ class MasterXTBot:
             except:
                 pass
 
-            acc = xt.get_account_capital()
-            balance = float(acc.get('usdt', 0))
+            balance = get_safe_balance()
             if balance <= 0:
-                balance = float(acc.get('free', 0) or acc.get('availableBalance', 0) or 100)
+                balance = 100.0  # مقدار پیش‌فرض جهت تست در صورت صفر بودن
             
             capital_in_trade = balance * state['capital_percent']
             quantity = (capital_in_trade * state['leverage']) / price
@@ -163,8 +176,7 @@ def handle_query(call):
         bot.send_message(CHAT_ID, "🔴 ربات متوقف شد.")
     elif call.data == "bal":
         try:
-            acc = xt.get_account_capital()
-            balance = acc.get('usdt', 0)
+            balance = get_safe_balance()
             bot.send_message(call.message.chat.id, f"💰 موجودی حساب: {balance} USDT")
         except Exception as e:
             bot.send_message(call.message.chat.id, f"خطا در دریافت موجودی: {e}")
@@ -188,3 +200,4 @@ threading.Thread(target=trading_loop, daemon=True).start()
 
 if __name__ == "__main__":
     bot.polling(none_stop=True)
+                           
