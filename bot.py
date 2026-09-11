@@ -201,8 +201,8 @@ def handle_query(call):
         try:
             bal = xt.get_balance()
             bot.send_message(call.message.chat.id, f"💰 موجودی فعلی حساب شما: {bal} USDT")
-        except:
-            bot.send_message(call.message.chat.id, "⚠️ خطا در دریافت موجودی. لطفاً کلید API را چک کنید.")
+        except Exception as e:
+            bot.send_message(call.message.chat.id, f"⚠️ خطای فنی:\n`{str(e)}`")
 
 # دریافت تنظیمات ریسک از کاربر
 @bot.message_handler(func=lambda m: "," in m.text)
@@ -222,4 +222,3 @@ threading.Thread(target=trading_loop, daemon=True).start()
 if __name__ == "__main__":
     print("MasterXTBot is launching...")
     bot.polling(none_stop=True)
-           
