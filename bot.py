@@ -27,19 +27,21 @@ xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 def get_safe_balance():
     try:
         acc = xt.get_account_capital()
-        print("DEBUG ACCOUNT CAPITAL RESPONSE:", acc)
+        print("DEBUG ACCOUNT CAPITAL RESPONSE:", acc, type(acc))
         if isinstance(acc, tuple):
             acc = acc[0]
         if isinstance(acc, list) and len(acc) > 0:
             acc = acc[0]
         if isinstance(acc, dict):
-            for key in ['usdt', 'free', 'availableBalance', 'balance', 'equity', 'available']:
+            for key in ['usdt', 'free', 'availableBalance', 'balance', 'equity', 'available', 'amount']:
                 if key in acc and acc[key] is not None:
-                    return float(acc[key])
-        return 0.0
+                    val = float(acc[key])
+                    if val > 0:
+                        return val
+        return 100.0
     except Exception as e:
         print(f"Error fetching balance: {e}")
-        return 0.0
+        return 100.0
 
 # --- سیستم مغز هوشمند ---
 class Brain:
@@ -93,9 +95,6 @@ class MasterXTBot:
                 pass
 
             balance = get_safe_balance()
-            if balance <= 0:
-                balance = 100.0  # مقدار پیش‌فرض جهت تست در صورت صفر بودن
-            
             capital_in_trade = balance * state['capital_percent']
             quantity = (capital_in_trade * state['leverage']) / price
             
@@ -204,4 +203,4 @@ threading.Thread(target=trading_loop, daemon=True).start()
 
 if __name__ == "__main__":
     bot.polling(none_stop=True)
-                       
+               
