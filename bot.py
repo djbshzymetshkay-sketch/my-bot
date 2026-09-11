@@ -23,15 +23,19 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 
-# --- تابع کمکی برای خواندن امن موجودی ---
+# --- تابع کمکی برای خواندن امن موجودی (به‌روز شده) ---
 def get_safe_balance():
     try:
         acc = xt.get_account_capital()
-        # اگر خروجی تپل باشد، معمولاً داده اصلی در خانه اول آن قرار دارد
+        print("DEBUG ACCOUNT CAPITAL RESPONSE:", acc)
         if isinstance(acc, tuple):
             acc = acc[0]
+        if isinstance(acc, list) and len(acc) > 0:
+            acc = acc[0]
         if isinstance(acc, dict):
-            return float(acc.get('usdt', 0) or acc.get('free', 0) or acc.get('availableBalance', 0) or 0)
+            for key in ['usdt', 'free', 'availableBalance', 'balance', 'equity', 'available']:
+                if key in acc and acc[key] is not None:
+                    return float(acc[key])
         return 0.0
     except Exception as e:
         print(f"Error fetching balance: {e}")
@@ -200,4 +204,4 @@ threading.Thread(target=trading_loop, daemon=True).start()
 
 if __name__ == "__main__":
     bot.polling(none_stop=True)
-                           
+                       
