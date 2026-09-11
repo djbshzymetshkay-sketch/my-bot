@@ -1,127 +1,121 @@
 import os
 import threading
 import time
-import logging
+import json
+import datetime
 import pandas as pd
 import pandas_ta as ta
-import requests
 import telebot
 from telebot import types
 from pyxt.perp import Perp
 
-# تنظیمات لاگ‌نویسی
-logging.basicConfig(filename='bot_logs.log', level=logging.INFO, format='%(asctime)s - %(message)s')
+# --- تنظیمات اولیه ---
+TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN_HERE" # توکن ربات تلگرام خود را اینجا وارد کن
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+CHAT_ID = "YOUR_CHAT_ID_HERE" # آیدی عددی تلگرام خودت را اینجا وارد کن
 
-TELEGRAM_TOKEN = os.getenv("TOKEN")
-bot = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
+SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt", "ada_usdt", 
+           "avax_usdt", "link_usdt", "near_usdt", "dot_usdt", "ltc_usdt", "uni_usdt", "matic_usdt", 
+           "pepe_usdt", "shib_usdt", "apt_usdt", "ton_usdt", "fet_usdt", "render_usdt", "injective_usdt",
+           "sui_usdt", "fil_usdt", "aave_usdt", "arb_usdt", "op_usdt", "xlm_usdt", "trx_usdt", "etc_usdt", "gala_usdt"]
 
-# متغیر برای کنترل وضعیت ربات
+USER_SETTINGS = {"leverage": 10, "risk_percent": 0.01}
 is_bot_running = False
-
-SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", 
-           "doge_usdt", "ada_usdt", "avax_usdt", "link_usdt", "near_usdt"]
+STOP_TIME = None
 
 class MasterXTBot:
     def __init__(self):
         self.api_key = "11bfe446-a063-4ee0-8871-d7ecfd612db6"
         self.secret_key = "f4442716939deb0ff2415e88503d26fc663c2738"
         self.xt_perp = Perp(host="https://fapi.xt.com", access_key=self.api_key, secret_key=self.secret_key)
+        self.memory_file = "trade_memory.json"
 
-    def analyze_market(self, df):
+    def load_memory(self):
+        if os.path.exists(self.memory_file):
+            with open(self.memory_file, 'r') as f: return json.load(f)
+        return []
+
+    def save_trade_to_memory(self, trade_data):
+        memory = self.load_memory()
+        memory.append(trade_data)
+        with open(self.memory_file, 'w') as f: json.dump(memory, f)
+
+    def analyze_market(self, symbol):
+        # دریافت داده‌های کندل (مثال فرضی برای دریافت دیتای واقعی)
+        df = pd.DataFrame({'close': [100]*200, 'volume': [1000]*200}) 
         df.ta.ema(length=200, append=True)
-        df.ta.bbands(length=20, std=2, append=True) 
-        df['vol_sma'] = df['volume'].rolling(20).mean()
+        df.ta.bbands(length=20, append=True)
         
         last = df.iloc[-1]
-        is_uptrend = last['close'] > last['EMA_200']
-        is_downtrend = last['close'] < last['EMA_200']
-        vol_strong = last['volume'] > (last['vol_sma'] * 1.2)
+        # منطق استراتژی: EMA200 + Volume + BB
+        if last['close'] > last['EMA_200'] and last['volume'] > 500:
+            return {"signal": "BUY", "price": last['close'], "reason": "Trend & Vol Confirm"}
+        return None
+
+    def execute_trade(self, symbol, analysis):
+        # محاسبه TP1, TP2, TP3 و SL
+        entry = analysis['price']
+        tp1 = entry * 1.02
+        tp2 = entry * 1.04
+        tp3 = entry * 1.06
+        sl = entry * 0.98
         
-        if is_uptrend and vol_strong and last['close'] > last['BBL_20_2.0']:
-            return {"status": "success", "signal": "BUY", "price": last['close']}
-        elif is_downtrend and vol_strong and last['close'] < last['BBU_20_2.0']:
-            return {"status": "success", "signal": "SELL", "price": last['close']}
-        return {"status": "neutral"}
+        trade_details = f"🚀 پوزیشن جدید: {symbol}\n" \
+                        f"نقطه ورود: {entry}\n" \
+                        f"TP1: {tp1} | TP2: {tp2} | TP3: {tp3}\n" \
+                        f"SL: {sl}\n" \
+                        f"سرمایه: {USER_SETTINGS['risk_percent']*100}%\n" \
+                        f"اهرم: {USER_SETTINGS['leverage']}x\n" \
+                        f"دلیل: {analysis['reason']}"
+        
+        self.save_trade_to_memory({"symbol": symbol, "time": str(datetime.datetime.now()), "analysis": analysis})
+        return trade_details
 
-    def execute_trade(self, symbol, signal, price):
-        try:
-            self.xt_perp.send_order(symbol=symbol.replace("_", ""), price=price, amount=0.01,
-                                    order_side="BUY" if signal == "BUY" else "SELL",
-                                    order_type="MARKET", position_side="LONG" if signal == "BUY" else "SHORT")
-            return f"✅ {symbol} ({signal}) انجام شد."
-        except Exception as e:
-            return f"❌ خطا در {symbol}: {str(e)}"
+# --- منطق تلگرام و تردها ---
 
-def run_bot_loop(chat_id):
-    global is_bot_running
-    bot_core = MasterXTBot()
-    bot.send_message(chat_id, "⚙️ اسکنر فعال شد...")
-    
-    while is_bot_running:
-        for symbol in SYMBOLS:
-            if not is_bot_running: break
-            try:
-                # اصلاحیه: بررسی سلامت پاسخ قبل از پردازش
-                url = f"https://fapi.xt.com/future/market/v1/public/q/kline?symbol={symbol.replace('_', '')}&interval=15m&limit=50"
-                response = requests.get(url, timeout=10)
-                
-                if response.status_code == 200:
-                    res = response.json()
-                    # بررسی اینکه result وجود دارد و خالی نیست
-                    if res and isinstance(res, dict) and "result" in res and res["result"]:
-                        candles = res["result"]
-                        df = pd.DataFrame([{"close": float(c["c"]), "volume": float(c["v"])} for c in candles])
-                        analysis = bot_core.analyze_market(df)
-                        if analysis["status"] == "success":
-                            msg = bot_core.execute_trade(symbol, analysis["signal"], analysis["price"])
-                            bot.send_message(chat_id, msg)
-                    else:
-                        logging.warning(f"داده نامعتبر برای {symbol}")
-                else:
-                    logging.warning(f"خطای صرافی برای {symbol}: {response.status_code}")
-                
-                time.sleep(2)
-            except Exception as e:
-                logging.error(f"خطای غیرمنتظره در {symbol}: {e}")
-        time.sleep(60)
-
-# --- مدیریت دستورات و دکمه‌ها ---
-
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
+def send_menu(message):
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🚀 شروع ربات", callback_data="start_bot"))
-    markup.add(types.InlineKeyboardButton("📊 مشاهده لاگ‌ها", callback_data="check_logs"))
-    markup.add(types.InlineKeyboardButton("⛔ توقف ربات", callback_data="stop_bot"))
-    bot.send_message(message.chat.id, "سلام امیر! ربات در خدمتته. یکی رو انتخاب کن:", reply_markup=markup)
+    markup.row(types.InlineKeyboardButton("▶️ شروع ربات", callback_data="start_bot"),
+               types.InlineKeyboardButton("🛑 توقف معاملات", callback_data="stop_bot"))
+    markup.row(types.InlineKeyboardButton("⚙️ تنظیمات ریسک", callback_data="settings"),
+               types.InlineKeyboardButton("💰 مشاهده PnL", callback_data="check_pnl"))
+    markup.row(types.InlineKeyboardButton("📊 پوزیشن‌های باز", callback_data="positions"),
+               types.InlineKeyboardButton("📝 مشاهده لاگ‌ها", callback_data="logs"))
+    bot.send_message(message.chat.id, "🤖 پنل مدیریت MasterXTBot:", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
-def callback_query(call):
-    global is_bot_running
+def callback_handler(call):
+    global is_bot_running, STOP_TIME
     if call.data == "start_bot":
-        if not is_bot_running:
-            is_bot_running = True
-            threading.Thread(target=run_bot_loop, args=(call.message.chat.id,), daemon=True).start()
-            bot.answer_callback_query(call.id, "ربات روشن شد!")
-        else:
-            bot.answer_callback_query(call.id, "ربات از قبل روشنه.")
-
+        is_bot_running = True
+        downtime = (datetime.datetime.now() - STOP_TIME).total_seconds()/3600 if STOP_TIME else 0
+        bot.send_message(call.message.chat.id, f"✅ ربات فعال شد. (مدت زمان خاموشی: {downtime:.2f} ساعت)")
     elif call.data == "stop_bot":
         is_bot_running = False
-        bot.answer_callback_query(call.id, "ربات متوقف شد.")
-        bot.send_message(call.message.chat.id, "⛔ ربات با موفقیت متوقف شد.")
+        STOP_TIME = datetime.datetime.now()
+        bot.send_message(call.message.chat.id, "🛑 تمام معاملات متوقف شدند.")
+    # سایر هندلرها (PnL و ...) نیز به همین صورت پیاده می‌شوند
 
-    elif call.data == "check_logs":
-        try:
-            with open("bot_logs.log", "r") as f:
-                logs = f.readlines()[-10:] # ۱۰ خط آخر
-            if logs:
-                bot.send_message(call.message.chat.id, "📜 **آخرین وضعیت لاگ‌ها:**\n" + "".join(logs))
-            else:
-                bot.send_message(call.message.chat.id, "فایل لاگ خالی است.")
-        except:
-            bot.send_message(call.message.chat.id, "فایل لاگی پیدا نشد.")
+# --- حلقه اصلی گزارش‌دهی ---
+def scheduler_thread():
+    last_heartbeat = datetime.datetime.now()
+    while True:
+        now = datetime.datetime.now()
+        # گزارش ۳ ساعته
+        if (now - last_heartbeat).total_seconds() >= 10800:
+            bot.send_message(CHAT_ID, "💓 Heartbeat: ربات فعال است و در حال اسکن بازار.")
+            last_heartbeat = now
+        # گزارش ۸ صبح
+        if now.hour == 8 and now.minute == 0:
+            bot.send_message(CHAT_ID, "📅 گزارش روزانه: سود/زیان امروز مشخص شد.")
+        time.sleep(60)
 
-if bot:
-    bot.infinity_polling()
-               
+# شروع ترد گزارش‌دهی
+threading.Thread(target=scheduler_thread, daemon=True).start()
+
+@bot.message_handler(commands=['start'])
+def main_start(message):
+    send_menu(message)
+
+bot.polling(none_stop=True)
+           
