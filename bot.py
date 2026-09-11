@@ -10,11 +10,9 @@ from telebot import types
 from pyxt.perp import Perp
 
 # --- پیکربندی اصلی ---
-# کلیدهای API از Screenshot_۲۰۲۶۰۹۰۹-۲۲۵۸۳۱-(2).png استخراج شد
 API_KEY = "92d10f20b77a4349a32074d164745b78"
 SECRET_KEY = "d970d5a065974317b35c6f2e3d4e3f9b"
 
-# تغییر نام متغیر به TOKEN برای هماهنگی با پنل Railway
 TELEGRAM_TOKEN = os.environ.get("TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
@@ -25,6 +23,11 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
+
+# --- کد اضافه شده برای دیباگ ---
+print("DEBUG: Available methods in xt object:")
+print(dir(xt))
+# ------------------------------
 
 # --- مدیریت حافظه و هوش مصنوعی ---
 class Brain:
@@ -51,88 +54,84 @@ brain = Brain()
 # --- متغیرهای وضعیت ---
 state = {
     "running": False,
-    "capital_percent": 0.1,  # درصد سرمایه درگیر (مثلاً ۱۰ درصد)
-    "leverage": 10,          # اهرم اصلی
+    "capital_percent": 0.1,  
+    "leverage": 10,          
     "last_stop_time": None,
     "daily_stats": {"trades": 0, "pnl": 0.0},
     "start_time": datetime.datetime.now()
 }
-active_positions = {} # {symbol: {details}}
+active_positions = {} 
 
 # --- هسته تحلیل و ترید ---
 class MasterXTBot:
     def get_data(self, symbol):
         try:
-            # فرض بر این است که متد get_kline مقدار DataFrame برمی‌گرداند
             df = xt.get_kline(symbol, interval='15m', limit=200) 
             return pd.DataFrame(df)
         except: return None
 
     def analyze(self, df):
-        # ۱- EMA 200
         df.ta.ema(length=200, append=True)
-        # ۲- Bollinger Bands
         df.ta.bbands(length=20, append=True)
-        # ۳- Volume Check
         avg_vol = df['volume'].rolling(window=20).mean()
         
         last = df.iloc[-1]
-        prev = df.iloc[-2]
         
-        # منطق سیگنال دهی
         signal = None
         reason = ""
         
         if last['close'] > last['EMA_200'] and last['volume'] > avg_vol.iloc[-1]:
-            if last['close'] < last['BBL_20_2.0']: # قیمت در باند پایین بولینگر (احتمال بازگشت)
+            if last['close'] < last['total_trades']-1) + 1) / self.data['total_trades']
+        else: self.data['win_rate'] = (self.data['win_rate'] * (self.data['total_trades']-1)) / self.data['total_trades']
+        self.save()
+
+brain = Brain()
+
+# --- متغیرهای وضعیت ---
+state = {
+    "running": False,
+    "capital_percent": 0.1,  
+    "leverage": 10,          
+    "last_stop_time": None,
+    "daily_stats": {"trades": 0, "pnl": 0.0},
+    "start_time": datetime.datetime.now()
+}
+active_positions = {} 
+
+# --- هسته تحلیل و ترید ---
+class MasterXTBot:
+    def get_data(self, symbol):
+        try:
+            df = xt.get_kline(symbol, interval='15m', limit=200) 
+            return pd.DataFrame(df)
+        except: return None
+
+    def analyze(self, df):
+        df.ta.ema(length=200, append=True)
+        df.ta.bbands(length=20, append=True)
+        avg_vol = df['volume'].rolling(window=20).mean()
+        
+        last = df.iloc[-1]
+        
+        signal = None
+        reason = ""
+        
+        if last['close'] > last['EMA_200'] and last['volume'] > avg_vol.iloc[-1]:
+            if last['close'] < last['BBL_20_2.0']: 
                 signal = "BUY"
                 reason = "EMA200 Trend + High Vol + BB Bottom"
         
         return signal, reason
 
     def execute_trade(self, symbol, reason, price):
-        # محاسبه سرمایه درگیر (مثلاً ۱۰ درصد موجودی)
-        balance = xt.get_balance() # فرض بر داشتن این متد
+        balance = xt.get_balance() 
         trade_amount = balance * state['capital_percent']
+datetime.now()
         
-        tp1 = price * 1.02
-        tp2 = price * 1.04
-        tp3 = price * 1.06
-        sl = price * 0.98
-        
-        # باز کردن پوزیشن در XT (فرضی)
-        # xt.place_order(symbol, side="BUY", amount=trade_amount, leverage=state['leverage'])
-        
-        pos_info = {
-            "entry": price, "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl,
-            "amount": trade_amount, "leverage": state['leverage'], "reason": reason
-        }
-        active_positions[symbol] = pos_info
-        
-        msg = (f"🚀 **پوزیشن باز شد!**\n\n"
-               f"🪙 ارز: `{symbol}`\n"
-               f"📍 ورود: `{price}`\n"
-               f"🎯 TP1: `{tp1:.2f}`\n"
-               f"🎯 TP2: `{tp2:.2f}`\n"
-               f"🎯 TP3: `{tp3:.2f}`\n"
-               f"🛑 SL: `{sl:.2f}`\n"
-               f"💰 سرمایه درگیر: `{trade_amount:.2f}`\n"
-               f"⚙️ اهرم: `{state['leverage']}x`\n"
-               f"💡 دلیل: {reason}")
-        bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
-
-# --- سیستم گزارش‌دهی و تردها ---
-def scheduler_task():
-    last_heartbeat = datetime.datetime.now()
-    while True:
-        now = datetime.datetime.now()
-        
-        # گزارش ۳ ساعته (Heartbeat)
         if (now - last_heartbeat).total_seconds() >= 10800:
             bot.send_message(CHAT_ID, "💓 Heartbeat: ربات فعال است و در حال تحلیل بازار است...")
             last_heartbeat = now
             
-        # گزارش روزانه ساعت ۸ صبح
         if now.hour == 8 and now.minute == 0:
             bot.send_message(CHAT_ID, f"📅 **گزارش روزانه:**\nتعداد معاملات: {state['daily_stats']['trades']}\nمجموع سود/زیان: {state['daily_stats']['pnl']}")
             state['daily_stats'] = {"trades": 0, "pnl": 0.0}
@@ -149,7 +148,7 @@ def trading_loop():
                     signal, reason = engine.analyze(df)
                     if signal == "BUY" and symbol not in active_positions:
                         engine.execute_trade(symbol, reason, df.iloc[-1]['close'])
-                time.sleep(3) # جلوگیری از محدودیت API
+                time.sleep(3) 
         time.sleep(10)
 
 # --- پنل تلگرام ---
@@ -204,7 +203,6 @@ def handle_query(call):
         except Exception as e:
             bot.send_message(call.message.chat.id, f"⚠️ خطای فنی:\n`{str(e)}`")
 
-# دریافت تنظیمات ریسک از کاربر
 @bot.message_handler(func=lambda m: "," in m.text)
 def set_risk(message):
     try:
@@ -222,4 +220,4 @@ threading.Thread(target=trading_loop, daemon=True).start()
 if __name__ == "__main__":
     print("MasterXTBot is launching...")
     bot.polling(none_stop=True)
-                           
+           
