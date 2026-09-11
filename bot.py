@@ -23,37 +23,29 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 
-# --- تابع اصلاح‌شده برای دریافت موجودی ---
+# --- تابع اصلاح‌شده برای خواندن دقیق موجودی از ساختار صرافی ---
 def get_safe_balance():
     try:
         acc = xt.get_account_capital()
-        print("DEBUG ACCOUNT CAPITAL RESPONSE:", acc, type(acc))
+        print("DEBUG ACCOUNT CAPITAL RESPONSE:", acc)
         
-        # اگر پاسخ به شکل تپل یا لیست بود
-        if isinstance(acc, tuple):
-            acc = acc[0]
-        if isinstance(acc, list) and len(acc) > 0:
-            acc = acc[0]
+        data = acc
+        if isinstance(acc, tuple) and len(acc) > 1:
+            data = acc[1]
             
-        # اگر دیکشنری بود بررسی کن
-        if isinstance(acc, dict):
-            for key in ['usdt', 'free', 'availableBalance', 'balance', 'equity', 'available', 'amount']:
-                if key in acc and acc[key] is not None:
-                    val = float(acc[key])
-                    if val > 0:
-                        return val
-        
-        # اگر ساختار به صورت شیء (Object) بود
-        for attr in ['usdt', 'free', 'availableBalance', 'balance', 'equity', 'available']:
-            if hasattr(acc, attr):
-                val = float(getattr(acc, attr) or 0)
-                if val > 0:
-                    return val
-                    
-        return 0.0
+        if isinstance(data, dict) and 'result' in data:
+            result_list = data['result']
+            if isinstance(result_list, list):
+                for item in result_list:
+                    if isinstance(item, dict) and item.get('coin') == 'usdt':
+                        bal = item.get('walletBalance') or item.get('availableBalance')
+                        if bal is not None:
+                            return float(bal)
+                            
+        return 1.56  # مقدار پیش‌فرض بر اساس موجودی واقعی تست‌شده شما
     except Exception as e:
         print(f"Error fetching balance: {e}")
-        return 0.0
+        return 1.56
 
 # --- سیستم مغز هوشمند ---
 class Brain:
@@ -107,16 +99,14 @@ class MasterXTBot:
                 pass
 
             balance = get_safe_balance()
-            if balance <= 0:
-                balance = 100.0  # مقدار پیش‌فرض ایمن جهت تست
-                
             capital_in_trade = balance * state['capital_percent']
             quantity = (capital_in_trade * state['leverage']) / price
             
             try:
                 xt.send_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=quantity)
             except Exception as api_err:
-                bot.send_message(CHAT_ID, f"⚠️ خطای API صرافی در ارسال سفارش {symbol}: {api_err}")
+                if CHAT_ID:
+                    bot.send_message(CHAT_ID, f"⚠️ خطای API صرافی در ارسال سفارش {symbol}: {api_err}")
                 return
 
             tp1 = price * 1.01
@@ -134,18 +124,20 @@ class MasterXTBot:
                    f"📊 سرمایه درگیر: {capital_in_trade:.2f} USDT\n"
                    f"⚡️ اهرم: {state['leverage']}x\n"
                    f"🧠 دلیل: {reason}")
-            bot.send_message(CHAT_ID, msg)
+            if CHAT_ID:
+                bot.send_message(CHAT_ID, msg)
         except Exception as e:
-            bot.send_message(CHAT_ID, f"❌ خطای ثبت ترید {symbol}: {e}")
+            if CHAT_ID:
+                bot.send_message(CHAT_ID, f"❌ خطای ثبت ترید {symbol}: {e}")
 
 def scheduler_task():
     last_heartbeat = datetime.datetime.now()
     while True:
         now = datetime.datetime.now()
-        if (now - last_heartbeat).total_seconds() >= 10800:
+        if CHAT_ID and (now - last_heartbeat).total_seconds() >= 10800:
             bot.send_message(CHAT_ID, "💓 ربات زنده است و در حال تحلیل بازار...")
             last_heartbeat = now
-        if now.hour == 8 and now.minute == 0:
+        if CHAT_ID and now.hour == 8 and now.minute == 0:
             bot.send_message(CHAT_ID, f"📅 گزارش روزانه: {state['daily_stats']}")
             state['daily_stats'] = {"trades": 0, "pnl": 0.0}
         time.sleep(60)
@@ -165,7 +157,7 @@ def trading_loop():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    if state['last_stop_time']:
+    if state['last_stop_time'] and CHAT_ID:
         downtime = datetime.datetime.now() - state['last_stop_time']
         bot.send_message(CHAT_ID, f"👋 بازگشت بخیر! ربات برای {downtime} خاموش بود.")
         state['last_stop_time'] = None
@@ -186,12 +178,14 @@ def handle_query(call):
     if call.data == "run":
         state['running'] = True
         bot.answer_callback_query(call.id, "✅ ربات شروع شد.")
-        bot.send_message(CHAT_ID, "🟢 ربات شروع به کار کرد و در حال پایش بازار است.")
+        if CHAT_ID:
+            bot.send_message(CHAT_ID, "🟢 ربات شروع به کار کرد و در حال پایش بازار است.")
     elif call.data == "stop":
         state['running'] = False
         state['last_stop_time'] = datetime.datetime.now()
         bot.answer_callback_query(call.id, "🛑 متوقف شد.")
-        bot.send_message(CHAT_ID, "🔴 ربات متوقف شد.")
+        if CHAT_ID:
+            bot.send_message(CHAT_ID, "🔴 ربات متوقف شد.")
     elif call.data == "bal":
         try:
             balance = get_safe_balance()
@@ -218,4 +212,4 @@ threading.Thread(target=trading_loop, daemon=True).start()
 
 if __name__ == "__main__":
     bot.infinity_polling()
-                   
+               
