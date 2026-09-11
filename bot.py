@@ -134,27 +134,31 @@ def scheduler_task():
             
         # گزارش روزانه ساعت ۸ صبح
         if now.hour == 8 and now.minute == 0:
-            bot.send_message(CHAT_ID, f"📅f"🎯 TP3: `{tp3:.2f}`\n"
-               f"🛑 SL: `{sl:.2f}`\n"
-               f"💰 سرمایه درگیر: `{trade_amount:.2f}`\n"
-               f"⚙️ اهرم: `{state['leverage']}x`\n"
-               f"💡 دلیل: {reason}")
-        bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
+            bot.send_message(CHAT_ID, f"📅 **گزارش روزانه:**\nتعداد معاملات: {state['daily_stats']['trades']}\nمجموع سود/زیان: {state['daily_stats']['pnl']}")
+            state['daily_stats'] = {"trades": 0, "pnl": 0.0}
 
-# --- سیستم گزارش‌دهی و تردها ---
-def scheduler_task():
-    last_heartbeat = datetime.datetime.now()
+        time.sleep(60)
+
+def trading_loop():
+    engine = MasterXTBot()
     while True:
-        now = datetime.datetime.now()
-        
-        # گزارش ۳ ساعته (Heartbeat)
-        if (now - last_heartbeat).total_seconds() >= 10800:
-            bot.send_message(CHAT_ID, "💓 Heartbeat: ربات فعال است و در حال تحلیل بازار است...")
-            last_heartbeat = now
-            
-        # گزارش روزانه ساعت ۸ صبح
-        if now.hour == 8 and now.minute == 0:
-            bot.send_message(CHAT_ID, f"📅 توقف معاملات", callback_data="stop"),
+        if state['running']:
+            for symbol in SYMBOLS:
+                df = engine.get_data(symbol)
+                if df is not None:
+                    signal, reason = engine.analyze(df)
+                    if signal == "BUY" and symbol not in active_positions:
+                        engine.execute_trade(symbol, reason, df.iloc[-1]['close'])
+                time.sleep(3) # جلوگیری از محدودیت API
+        time.sleep(10)
+
+# --- پنل تلگرام ---
+@bot.message_handler(commands=['start'])
+def start(message):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("▶️ شروع ربات", callback_data="run"),
+        types.InlineKeyboardButton("🛑 توقف معاملات", callback_data="stop"),
         types.InlineKeyboardButton("⚙️ تنظیمات ریسک", callback_data="risk_cfg"),
         types.InlineKeyboardButton("💰 سود و زیان", callback_data="pnl_view"),
         types.InlineKeyboardButton("📊 پوزیشن‌های باز", callback_data="pos_view"),
@@ -195,14 +199,10 @@ def handle_query(call):
 
     elif call.data == "balance":
         try:
-            # عیب‌یابی: چاپ متدهای کلاس در لاگ‌های Railway
-            print("--- DEBUG: Available methods in xt object ---")
-            print([m for m in dir(xt) if not m.startswith('_')])
-            
-            bal = xt.get_balance() # این خط احتمالاً هنوز خطا می‌دهد
+            bal = xt.get_balance()
             bot.send_message(call.message.chat.id, f"💰 موجودی فعلی حساب شما: {bal} USDT")
         except Exception as e:
-            bot.send_message(call.message.chat.id, f"⚠️ خطای فنی:\n`{str(e)}`\n\n(لاگ‌های Railway را برای مشاهده نام متدهای موجود چک کنید)")
+            bot.send_message(call.message.chat.id, f"⚠️ خطای فنی:\n`{str(e)}`")
 
 # دریافت تنظیمات ریسک از کاربر
 @bot.message_handler(func=lambda m: "," in m.text)
@@ -222,4 +222,4 @@ threading.Thread(target=trading_loop, daemon=True).start()
 if __name__ == "__main__":
     print("MasterXTBot is launching...")
     bot.polling(none_stop=True)
-               
+                           
