@@ -14,7 +14,8 @@ from pyxt.perp import Perp
 API_KEY = "92d10f20b77a4349a32074d164745b78"
 SECRET_KEY = "d970d5a065974317b35c6f2e3d4e3f9b"
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+# تغییر نام متغیر به TOKEN برای هماهنگی با پنل Railway
+TELEGRAM_TOKEN = os.environ.get("TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
 SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt", "ada_usdt", 
@@ -170,7 +171,6 @@ def start(message):
 def handle_query(call):
     if call.data == "run":
         if state['last_stop_time']:
-            # diff = state['last_stop_time'] - datetime.datetime.now() # (ساده شده برای نمایش)
             bot.answer_callback_query(call.id, "خوش آمدی! مدتی خاموش بودیم.")
         state['running'] = True
         bot.edit_message_text("✅ ربات در حال اجراست...", call.message.chat.id, call.message.message_id)
@@ -181,7 +181,6 @@ def handle_query(call):
         bot.answer_callback_query(call.id, "🛑 معاملات متوقف شد.")
 
     elif call.data == "risk_cfg":
-        # در اینجا برای سادگی، یک پیام با قابلیت دریافت متن می‌فرستیم
         bot.send_message(call.message.chat.id, "لطفاً تنظیمات را به این صورت بفرستید:\n`percent,leverage`\nمثال: `0.1,10`")
 
     elif call.data == "pos_view":
@@ -209,3 +208,4 @@ threading.Thread(target=trading_loop, daemon=True).start()
 if __name__ == "__main__":
     print("MasterXTBot is launching...")
     bot.polling(none_stop=True)
+               
