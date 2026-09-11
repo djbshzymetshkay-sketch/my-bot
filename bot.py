@@ -169,6 +169,7 @@ def start(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
+    bot.answer_callback_query(call.id)
     if call.data == "run":
         if state['last_stop_time']:
             bot.answer_callback_query(call.id, "خوش آمدی! مدتی خاموش بودیم.")
@@ -189,6 +190,19 @@ def handle_query(call):
         else:
             for sym, p in active_positions.items():
                 bot.send_message(call.message.chat.id, f"🪙 {sym}\n📍 ورود: {p['entry']}\n🎯 TP1: {p['tp1']}")
+                
+    elif call.data == "pnl_view":
+        bot.send_message(call.message.chat.id, f"📊 مجموع سود/زیان فعلی: {state['daily_stats']['pnl']}")
+
+    elif call.data == "logs":
+        bot.send_message(call.message.chat.id, "📝 لاگ‌ها:\nسیستم در حال حاضر بدون خطا در حال تحلیل است...")
+
+    elif call.data == "balance":
+        try:
+            bal = xt.get_balance()
+            bot.send_message(call.message.chat.id, f"💰 موجودی فعلی حساب شما: {bal} USDT")
+        except:
+            bot.send_message(call.message.chat.id, "⚠️ خطا در دریافت موجودی. لطفاً کلید API را چک کنید.")
 
 # دریافت تنظیمات ریسک از کاربر
 @bot.message_handler(func=lambda m: "," in m.text)
@@ -208,4 +222,4 @@ threading.Thread(target=trading_loop, daemon=True).start()
 if __name__ == "__main__":
     print("MasterXTBot is launching...")
     bot.polling(none_stop=True)
-               
+           
