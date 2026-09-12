@@ -3,6 +3,8 @@ import time
 import json
 import datetime
 import os
+import sys
+import atexit
 import pandas as pd
 import pandas_ta as ta
 import telebot
@@ -22,6 +24,19 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
+
+# --- سیستم هشدار خاموشی ربات ---
+def notify_shutdown(reason="نامشخص (ریست سرور یا توقف دستی)"):
+    if CHAT_ID and TELEGRAM_TOKEN:
+        try:
+            # استفاده از ارتباط مستقیم برای مواقع بحرانی خاموشی
+            emergency_bot = telebot.TeleBot(TELEGRAM_TOKEN)
+            emergency_bot.send_message(CHAT_ID, f"⚠️ **هشدار: ربات متوقف شد!**\n\n🔴 دلیل توقف: {reason}")
+        except Exception as e:
+            print(f"Error sending shutdown message: {e}")
+
+# ثبت تابع برای اجرا هنگام بسته شدن برنامه
+atexit.register(lambda: notify_shutdown("خاموش شدن عادی یا بسته‌شدن اسکریپت"))
 
 def get_safe_balance():
     try:
@@ -63,8 +78,8 @@ brain = Brain()
 active_positions = {}
 state = {
     "running": False,
-    "capital_percent": 0.5,  # پیش‌فرض روی 50 درصد برای موجودی کم
-    "leverage": 20,          # پیش‌فرض روی 20x برای رد شدن از حداقل حجم صرافی
+    "capital_percent": 0.5,
+    "leverage": 20,
     "last_stop_time": None,
     "daily_stats": {"trades": 0, "pnl": 0.0}
 }
@@ -101,7 +116,7 @@ class MasterXTBot:
                 xt.send_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=quantity)
             except Exception as api_err:
                 if CHAT_ID:
-                    bot.send_message(CHAT_ID, f"⚠️ خطای API صرافی در سفارش {symbol} (احتمالاً کمتر از حداقل حجم صرافی): {api_err}")
+                    bot.send_message(CHAT_ID, f"⚠️ خطای API صرافی در سفارش {symbol}: {api_err}")
                 return
 
             tp1 = price * 1.01
@@ -129,23 +144,29 @@ def scheduler_task():
     last_heartbeat = datetime.datetime.now()
     while True:
         now = datetime.datetime.now()
-        if CHAT_ID and (now - last_heartbeat).total_seconds() >= 10800:
-            bot.send_message(CHAT_ID, "💓 ربات زنده است و در حال پایش بازار...")
+        # گزارش هر ۱۰ دقیقه یک‌بار (۶۰۰ ثانیه)
+        if CHAT_ID and (now - last_heartbeat).total_seconds() >= 600:
+            status_text = "🟢 روشن و در حال پایش" if state['running'] else "🔴 متوقف (آماده به کار)"
+            bot.send_message(CHAT_ID, f"💓 ربات زنده است!\nوضعیت موتور: {status_text}")
             last_heartbeat = now
-        time.sleep(60)
+        time.sleep(30)
 
 def trading_loop():
     engine = MasterXTBot()
     while True:
-        if state['running']:
-            for symbol in SYMBOLS:
-                df = engine.get_data(symbol)
-                if df is not None:
-                    sig, reason = engine.analyze(df)
-                    if sig == "BUY" and symbol not in active_positions:
-                        engine.execute_trade(symbol, reason, df.iloc[-1]['close'])
-                time.sleep(2)
-        time.sleep(10)
+        try:
+            if state['running']:
+                for symbol in SYMBOLS:
+                    df = engine.get_data(symbol)
+                    if df is not None:
+                        sig, reason = engine.analyze(df)
+                        if sig == "BUY" and symbol not in active_positions:
+                            engine.execute_trade(symbol, reason, df.iloc[-1]['close'])
+                    time.sleep(2)
+            time.sleep(10)
+        except Exception as e:
+            print(f"Loop error: {e}")
+            time.sleep(10)
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -175,7 +196,7 @@ def handle_query(call):
         state['last_stop_time'] = datetime.datetime.now()
         bot.answer_callback_query(call.id, "🛑 متوقف شد.")
         if CHAT_ID:
-            bot.send_message(CHAT_ID, "🔴 ربات متوقف شد.")
+            bot.send_message(CHAT_ID, "🔴 ربات توسط شما متوقف شد.")
     elif call.data == "bal":
         try:
             balance = get_safe_balance()
@@ -240,5 +261,7 @@ threading.Thread(target=scheduler_task, daemon=True).start()
 threading.Thread(target=trading_loop, daemon=True).start()
 
 if __name__ == "__main__":
-    bot.infinity_polling()
-               
+    try:
+        bot.infinity_polling()
+    except Exception as e:
+        notify_shutdown(f"خطای بحرانی در polling: {e}")
