@@ -29,13 +29,11 @@ xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 def notify_shutdown(reason="نامشخص (ریست سرور یا توقف دستی)"):
     if CHAT_ID and TELEGRAM_TOKEN:
         try:
-            # استفاده از ارتباط مستقیم برای مواقع بحرانی خاموشی
             emergency_bot = telebot.TeleBot(TELEGRAM_TOKEN)
             emergency_bot.send_message(CHAT_ID, f"⚠️ **هشدار: ربات متوقف شد!**\n\n🔴 دلیل توقف: {reason}")
         except Exception as e:
             print(f"Error sending shutdown message: {e}")
 
-# ثبت تابع برای اجرا هنگام بسته شدن برنامه
 atexit.register(lambda: notify_shutdown("خاموش شدن عادی یا بسته‌شدن اسکریپت"))
 
 def get_safe_balance():
@@ -79,7 +77,7 @@ active_positions = {}
 state = {
     "running": False,
     "capital_percent": 0.5,
-    "leverage": 20,
+    "leverage": 50,  # پیش‌فرض روی اهرم بالا برای جبران سرمایه خرد
     "last_stop_time": None,
     "daily_stats": {"trades": 0, "pnl": 0.0}
 }
@@ -87,18 +85,47 @@ state = {
 class MasterXTBot:
     def get_data(self, symbol):
         try:
-            df = xt.get_kline(symbol, interval='15m', limit=200)
+            df = xt.get_kline(symbol, interval='15m', limit=50)
+            if df is None:
+                return None
             return pd.DataFrame(df)
-        except: return None
+        except: 
+            return None
 
     def analyze(self, df):
-        df.ta.ema(length=200, append=True)
-        df.ta.bbands(length=20, append=True)
-        avg_vol = df['volume'].rolling(window=20).mean()
-        last = df.iloc[-1]
+        if df is None or len(df) < 25:
+            return None, ""
         
-        if last['close'] > last['EMA_200'] and last['volume'] > avg_vol.iloc[-1] and last['close'] < last['BBL_20_2.0']:
-            return "BUY", "EMA200 Trend + High Vol + BB Bottom"
+        close = df['close'].astype(float)
+        volume = df['volume'].astype(float)
+
+        # استراتژی آزادتر: تقاطع EMA سریع یا RSI زیر ۴۵ + حجم نسبی معقول
+        ema9 = close.ewm(span=9, adjust=False).mean()
+        ema21 = close.ewm(span=21, adjust=False).mean()
+
+        delta = close.diff()
+        gain = delta.where(delta > 0, 0.0).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0.0)).rolling(window=14).mean()
+        rs = gain / (loss + 1e-10)
+        rsi = 100 - (100 / (1 + rs))
+
+        curr_ema9 = ema9.iloc[-1]
+        prev_ema9 = ema9.iloc[-2]
+        curr_ema21 = ema21.iloc[-1]
+        prev_ema21 = ema21.iloc[-2]
+        curr_rsi = rsi.iloc[-1]
+
+        vol_avg = volume.rolling(10).mean().iloc[-1]
+        vol_ok = volume.iloc[-1] > (vol_avg * 0.7 if pd.notna(vol_avg) else 0)
+
+        cross_up = (prev_ema9 <= prev_ema21) and (curr_ema9 > curr_ema21)
+        rsi_buy = curr_rsi < 45
+
+        if (cross_up or rsi_buy) and vol_ok:
+            reasons = []
+            if cross_up: reasons.append("EMA9/21 CrossUp")
+            if rsi_buy: reasons.append(f"RSI({curr_rsi:.1f})<45")
+            return "BUY", " + ".join(reasons) + " + VolOK"
         return None, ""
 
     def execute_trade(self, symbol, reason, price):
@@ -116,7 +143,7 @@ class MasterXTBot:
                 xt.send_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=quantity)
             except Exception as api_err:
                 if CHAT_ID:
-                    bot.send_message(CHAT_ID, f"⚠️ خطای API صرافی در سفارش {symbol}: {api_err}")
+                    bot.send_message(CHAT_ID, f"⚠️ خطای API صرافی (احتمال Min Notional یا Margin کافی نیست) در {symbol}: {api_err}")
                 return
 
             tp1 = price * 1.01
@@ -144,9 +171,8 @@ def scheduler_task():
     last_heartbeat = datetime.datetime.now()
     while True:
         now = datetime.datetime.now()
-        # گزارش هر ۱۰ دقیقه یک‌بار (۶۰۰ ثانیه)
         if CHAT_ID and (now - last_heartbeat).total_seconds() >= 600:
-            status_text = "🟢 روشن و در حال پایش" if state['running'] else "🔴 متوقف (آماده به کار)"
+            status_text = "🟢 روشن و در حال پایش (آزاد)" if state['running'] else "🔴 متوقف (آماده به کار)"
             bot.send_message(CHAT_ID, f"💓 ربات زنده است!\nوضعیت موتور: {status_text}")
             last_heartbeat = now
         time.sleep(30)
@@ -162,8 +188,8 @@ def trading_loop():
                         sig, reason = engine.analyze(df)
                         if sig == "BUY" and symbol not in active_positions:
                             engine.execute_trade(symbol, reason, df.iloc[-1]['close'])
-                    time.sleep(2)
-            time.sleep(10)
+                    time.sleep(1.5)
+            time.sleep(5)
         except Exception as e:
             print(f"Loop error: {e}")
             time.sleep(10)
@@ -182,7 +208,7 @@ def send_control_panel(chat_id):
         types.InlineKeyboardButton("📊 پوزیشن‌ها", callback_data="pos"),
         types.InlineKeyboardButton("🔍 موجودی", callback_data="bal")
     )
-    bot.send_message(chat_id, "🤖 MasterXTBot پنل کنترل:", reply_markup=markup)
+    bot.send_message(chat_id, "🤖 MasterXTBot پنل کنترل (حالت آزاد):", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
@@ -190,7 +216,7 @@ def handle_query(call):
         state['running'] = True
         bot.answer_callback_query(call.id, "✅ ربات شروع شد.")
         if CHAT_ID:
-            bot.send_message(CHAT_ID, "🟢 ربات شروع به کار کرد و در حال پایش بازار است.")
+            bot.send_message(CHAT_ID, "🟢 ربات شروع به کار کرد و در حال پایش بازار با استراتژی آزاد است.")
     elif call.data == "stop":
         state['running'] = False
         state['last_stop_time'] = datetime.datetime.now()
