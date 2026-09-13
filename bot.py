@@ -242,11 +242,37 @@ def handle_text_buttons(message):
                 pos_msg += f"- {sym} | ورود: {data['entry']} | اهرم: {state['leverage']}x\n"
             bot.send_message(chat_id, pos_msg, reply_markup=get_reply_keyboard())
     elif text == "⚙️ ریسک":
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
+        markup.add(
+            types.KeyboardButton("سرمایه: 25%"),
+            types.KeyboardButton("سرمایه: 50%"),
+            types.KeyboardButton("سرمایه: 100%"),
+            types.KeyboardButton("اهرم: 10x"),
+            types.KeyboardButton("اهرم: 20x"),
+            types.KeyboardButton("اهرم: 50x"),
+            types.KeyboardButton("🔙 بازگشت به منوی اصلی")
+        )
         bot.send_message(
             chat_id, 
-            f"⚙️ تنظیمات ریسک فعلی:\n- درصد سرمایه درگیر: {state['capital_percent']*100}%\n- اهرم (لوریج): {state['leverage']}x\n(برای تغییر اهرم/سرمایه می‌توانید موقتاً با کامند یا کد شخصی‌سازی کنید)",
-            reply_markup=get_reply_keyboard()
+            f"⚙️ تنظیمات ریسک فعلی:\n- درصد سرمایه درگیر: {state['capital_percent']*100}%\n- اهرم (لوریج): {state['leverage']}x\n\nگزینه جدید را انتخاب کنید:",
+            reply_markup=markup
         )
+    elif text.startswith("سرمایه: "):
+        try:
+            val = int(text.replace("سرمایه: ", "").replace("%", ""))
+            state['capital_percent'] = val / 100.0
+            bot.send_message(chat_id, f"✅ درصد سرمایه روی {val}% تنظیم شد.", reply_markup=get_reply_keyboard())
+        except Exception:
+            bot.send_message(chat_id, "خطا در تنظیم سرمایه.", reply_markup=get_reply_keyboard())
+    elif text.startswith("اهرم: "):
+        try:
+            val = int(text.replace("اهرم: ", "").replace("x", ""))
+            state['leverage'] = val
+            bot.send_message(chat_id, f"✅ اهرم روی {val}x تنظیم شد.", reply_markup=get_reply_keyboard())
+        except Exception:
+            bot.send_message(chat_id, "خطا در تنظیم اهرم.", reply_markup=get_reply_keyboard())
+    elif text == "🔙 بازگشت به منوی اصلی":
+        bot.send_message(chat_id, "منوی اصلی:", reply_markup=get_reply_keyboard())
     elif text == "🟢 وضعیت اتصال صرافی":
         try:
             balance = get_safe_balance()
