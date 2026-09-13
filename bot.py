@@ -75,9 +75,9 @@ class Brain:
 brain = Brain()
 active_positions = {}
 state = {
-    "running": False,
+    "running": True,  # یکسره روشن
     "capital_percent": 0.5,
-    "leverage": 50,  # پیش‌فرض روی اهرم بالا برای جبران سرمایه خرد
+    "leverage": 50,
     "last_stop_time": None,
     "daily_stats": {"trades": 0, "pnl": 0.0}
 }
@@ -85,7 +85,8 @@ state = {
 class MasterXTBot:
     def get_data(self, symbol):
         try:
-            df = xt.get_kline(symbol, interval='15m', limit=50)
+            # تغییر به تایم‌فریم 5 دقیقه‌ای برای سیگنال‌دهی بیشتر
+            df = xt.get_kline(symbol, interval='5m', limit=50)
             if df is None:
                 return None
             return pd.DataFrame(df)
@@ -99,7 +100,6 @@ class MasterXTBot:
         close = df['close'].astype(float)
         volume = df['volume'].astype(float)
 
-        # استراتژی آزادتر: تقاطع EMA سریع یا RSI زیر ۴۵ + حجم نسبی معقول
         ema9 = close.ewm(span=9, adjust=False).mean()
         ema21 = close.ewm(span=21, adjust=False).mean()
 
@@ -143,7 +143,7 @@ class MasterXTBot:
                 xt.send_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=quantity)
             except Exception as api_err:
                 if CHAT_ID:
-                    bot.send_message(CHAT_ID, f"⚠️ خطای API صرافی (احتمال Min Notional یا Margin کافی نیست) در {symbol}: {api_err}")
+                    bot.send_message(CHAT_ID, f"⚠️ خطای API صرافی (Min Notional/Margin) در {symbol}: {api_err}")
                 return
 
             tp1 = price * 1.01
@@ -154,7 +154,7 @@ class MasterXTBot:
             active_positions[symbol] = {"entry": price, "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl, "quantity": quantity}
             state['daily_stats']['trades'] += 1
             
-            msg = (f"🚀 پوزیشن جدید: {symbol}\n"
+            msg = (f"🚀 پوزیشن جدید: {symbol} (5m)\n"
                    f"💰 قیمت ورود: {price}\n"
                    f"🎯 TP1: {tp1:.4f} | TP2: {tp2:.4f} | TP3: {tp3:.4f}\n"
                    f"🛑 حد ضرر: {sl:.4f}\n"
@@ -172,8 +172,7 @@ def scheduler_task():
     while True:
         now = datetime.datetime.now()
         if CHAT_ID and (now - last_heartbeat).total_seconds() >= 600:
-            status_text = "🟢 روشن و در حال پایش (آزاد)" if state['running'] else "🔴 متوقف (آماده به کار)"
-            bot.send_message(CHAT_ID, f"💓 ربات زنده است!\nوضعیت موتور: {status_text}")
+            bot.send_message(CHAT_ID, "💓 ربات یکسره روشن و در حال پایش (5m)...")
             last_heartbeat = now
         time.sleep(30)
 
@@ -188,100 +187,52 @@ def trading_loop():
                         sig, reason = engine.analyze(df)
                         if sig == "BUY" and symbol not in active_positions:
                             engine.execute_trade(symbol, reason, df.iloc[-1]['close'])
-                    time.sleep(1.5)
-            time.sleep(5)
+                    time.sleep(1.0)
+            time.sleep(3)
         except Exception as e:
             print(f"Loop error: {e}")
-            time.sleep(10)
+            time.sleep(5)
+
+def get_reply_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add(
+        types.KeyboardButton("آمار معاملات امروز"),
+        types.KeyboardButton("تحلیل لحظه‌ای بازار"),
+        types.KeyboardButton("وضعیت اتصال صرافی")
+    )
+    return markup
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    send_control_panel(message.chat.id)
-
-def send_control_panel(chat_id):
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("▶️ شروع", callback_data="run"),
-        types.InlineKeyboardButton("🛑 توقف", callback_data="stop"),
-        types.InlineKeyboardButton("⚙️ ریسک", callback_data="risk_menu"),
-        types.InlineKeyboardButton("💰 سود/زیان", callback_data="pnl"),
-        types.InlineKeyboardButton("📊 پوزیشن‌ها", callback_data="pos"),
-        types.InlineKeyboardButton("🔍 موجودی", callback_data="bal")
+    bot.send_message(
+        message.chat.id, 
+        "🤖 ربات فعال و یکسره روی تایم 5m در حال پایش است.", 
+        reply_markup=get_reply_keyboard()
     )
-    bot.send_message(chat_id, "🤖 MasterXTBot پنل کنترل (حالت آزاد):", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: True)
-def handle_query(call):
-    if call.data == "run":
-        state['running'] = True
-        bot.answer_callback_query(call.id, "✅ ربات شروع شد.")
-        if CHAT_ID:
-            bot.send_message(CHAT_ID, "🟢 ربات شروع به کار کرد و در حال پایش بازار با استراتژی آزاد است.")
-    elif call.data == "stop":
-        state['running'] = False
-        state['last_stop_time'] = datetime.datetime.now()
-        bot.answer_callback_query(call.id, "🛑 متوقف شد.")
-        if CHAT_ID:
-            bot.send_message(CHAT_ID, "🔴 ربات توسط شما متوقف شد.")
-    elif call.data == "bal":
-        try:
-            balance = get_safe_balance()
-            bot.send_message(call.message.chat.id, f"💰 موجودی حساب: {balance} USDT")
-        except Exception as e:
-            bot.send_message(call.message.chat.id, f"خطا در دریافت موجودی: {e}")
-    elif call.data == "pnl":
+@bot.message_handler(func=lambda msg: True)
+def handle_text_buttons(message):
+    text = message.text
+    chat_id = message.chat.id
+    
+    if text == "آمار معاملات امروز":
         pnl = state['daily_stats']['pnl']
         trades = state['daily_stats']['trades']
-        bot.send_message(call.message.chat.id, f"📊 آمار امروز:\nتعداد معاملات: {trades}\nسود/زیان مجموع: {pnl} USDT\nنرخ موفقیت مغز هوشمند: {brain.data['win_rate']*100:.1f}%")
-    elif call.data == "pos":
+        bot.send_message(chat_id, f"📊 آمار امروز:\nتعداد معاملات: {trades}\nسود/زیان مجموع: {pnl} USDT\nنرخ موفقیت: {brain.data['win_rate']*100:.1f}%", reply_markup=get_reply_keyboard())
+    elif text == "تحلیل لحظه‌ای بازار":
         if not active_positions:
-            bot.send_message(call.message.chat.id, "📭 هیچ پوزیشن فعالی وجود ندارد.")
+            bot.send_message(chat_id, "📭 هیچ پوزیشن فعالی باز نیست (در حال اسکن 5m).", reply_markup=get_reply_keyboard())
         else:
-            pos_msg = "📈 پوزیشن‌های باز:\n"
+            pos_msg = "📈 پوزیشن‌های فعال:\n"
             for sym, data in active_positions.items():
                 pos_msg += f"- {sym} | ورود: {data['entry']} | اهرم: {state['leverage']}x\n"
-            bot.send_message(call.message.chat.id, pos_msg)
-    elif call.data == "risk_menu":
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            types.InlineKeyboardButton("درصد سرمایه: 25%", callback_data="set_cap_25"),
-            types.InlineKeyboardButton("درصد سرمایه: 50%", callback_data="set_cap_50"),
-            types.InlineKeyboardButton("درصد سرمایه: 100%", callback_data="set_cap_100"),
-            types.InlineKeyboardButton("اهرم: 10x", callback_data="set_lev_10"),
-            types.InlineKeyboardButton("اهرم: 20x", callback_data="set_lev_20"),
-            types.InlineKeyboardButton("اهرم: 50x", callback_data="set_lev_50"),
-            types.InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")
-        )
-        bot.edit_message_text(
-            f"⚙️ تنظیمات ریسک فعلی:\n"
-            f"- درصد سرمایه درگیر: {state['capital_percent']*100}%\n"
-            f"- اهرم (لوریج): {state['leverage']}x\n\n"
-            f"یک گزینه را برای تغییر انتخاب کنید:",
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            reply_markup=markup
-        )
-    elif call.data.startswith("set_cap_"):
-        val = int(call.data.split("_")[2])
-        state['capital_percent'] = val / 100.0
-        bot.answer_callback_query(call.id, f"✅ درصد سرمایه روی {val}% تنظیم شد.")
-        handle_query(type('obj', (object,), {'data': 'risk_menu', 'message': call.message, 'id': call.id}()))
-    elif call.data.startswith("set_lev_"):
-        val = int(call.data.split("_")[2])
-        state['leverage'] = val
-        bot.answer_callback_query(call.id, f"✅ اهرم روی {val}x تنظیم شد.")
-        handle_query(type('obj', (object,), {'data': 'risk_menu', 'message': call.message, 'id': call.id}()))
-    elif call.data == "back_main":
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            types.InlineKeyboardButton("▶️ شروع", callback_data="run"),
-            types.InlineKeyboardButton("🛑 توقف", callback_data="stop"),
-            types.InlineKeyboardButton("⚙️ ریسک", callback_data="risk_menu"),
-            types.InlineKeyboardButton("💰 سود/زیان", callback_data="pnl"),
-            types.InlineKeyboardButton("📊 پوزیشن‌ها", callback_data="pos"),
-            types.InlineKeyboardButton("🔍 موجودی", callback_data="bal")
-        )
-        bot.edit_message_text("🤖 MasterXTBot پنل کنترل:", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=markup)
+            bot.send_message(chat_id, pos_msg, reply_markup=get_reply_keyboard())
+    elif text == "وضعیت اتصال صرافی":
+        try:
+            balance = get_safe_balance()
+            bot.send_message(chat_id, f"🟢 اتصال برقرار است.\n💰 موجودی کیف پول: {balance} USDT", reply_markup=get_reply_keyboard())
+        except Exception as e:
+            bot.send_message(chat_id, f"🔴 خطا در اتصال صرافی: {e}", reply_markup=get_reply_keyboard())
 
 threading.Thread(target=scheduler_task, daemon=True).start()
 threading.Thread(target=trading_loop, daemon=True).start()
