@@ -16,6 +16,7 @@ API_KEY = "11bfe446-a063-4ee0-8871-d7ecfd612db6"
 SECRET_KEY = "f4442716939deb0ff2415e88503d26fc663c2738"
 TELEGRAM_TOKEN = os.environ.get("TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
+POSITIONS_FILE = "active_positions.json"
 
 SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt", "ada_usdt", 
            "avax_usdt", "link_usdt", "near_usdt", "dot_usdt", "ltc_usdt", "uni_usdt", "matic_usdt", 
@@ -72,8 +73,25 @@ class Brain:
         self.data['win_rate'] = (self.data['win_rate'] * (self.data['total_trades']-1) + factor) / self.data['total_trades']
         self.save()
 
+def load_active_positions():
+    if os.path.exists(POSITIONS_FILE):
+        try:
+            with open(POSITIONS_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading positions file: {e}")
+            return {}
+    return {}
+
+def save_active_positions():
+    try:
+        with open(POSITIONS_FILE, 'w') as f:
+            json.dump(active_positions, f)
+    except Exception as e:
+        print(f"Error saving positions file: {e}")
+
 brain = Brain()
-active_positions = {}
+active_positions = load_active_positions()
 state = {
     "running": True,
     "capital_percent": 0.5,
@@ -160,6 +178,7 @@ class MasterXTBot:
             sl = price * 0.98
             
             active_positions[symbol] = {"entry": price, "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl, "quantity": quantity}
+            save_active_positions()
             state['daily_stats']['trades'] += 1
             
             msg = (f"🚀 پوزیشن جدید: {symbol} (5m)\n"
@@ -195,6 +214,7 @@ def manage_positions():
                             try:
                                 xt.send_order(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
                                 del active_positions[symbol]
+                                save_active_positions()
                                 state['daily_stats']['pnl'] -= (entry - current_price) * quantity
                                 brain.learn(False)
                                 if CHAT_ID:
@@ -207,6 +227,7 @@ def manage_positions():
                             try:
                                 xt.send_order(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
                                 del active_positions[symbol]
+                                save_active_positions()
                                 profit = (current_price - entry) * quantity
                                 state['daily_stats']['pnl'] += profit
                                 brain.learn(True)
@@ -263,7 +284,7 @@ def get_reply_keyboard():
 def start(message):
     bot.send_message(
         message.chat.id, 
-        "🤖 MasterXTBot همراه با مدیریت خودکار TP/SL فعال شد:", 
+        "🤖 MasterXTBot همراه با ذخیره‌سازی دائمی پوزیشن‌ها فعال شد:", 
         reply_markup=get_reply_keyboard()
     )
 
