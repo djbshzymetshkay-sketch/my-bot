@@ -75,7 +75,7 @@ class Brain:
 brain = Brain()
 active_positions = {}
 state = {
-    "running": True,  # یکسره روشن
+    "running": True,
     "capital_percent": 0.5,
     "leverage": 50,
     "last_stop_time": None,
@@ -85,20 +85,40 @@ state = {
 class MasterXTBot:
     def get_data(self, symbol):
         try:
-            df = xt.get_kline(symbol, interval='5m', limit=50)
-            if df is None:
+            res = xt.get_kline(symbol, interval='5m', limit=50)
+            if not res:
                 return None
-            return pd.DataFrame(df)
-        except: 
+            
+            # پاک‌سازی و استخراج امن دیتافریم از خروجی صرافی
+            data = res
+            if isinstance(res, tuple) and len(res) > 1:
+                data = res[1]
+            if isinstance(data, dict) and 'result' in data:
+                data = data['result']
+                
+            df = pd.DataFrame(data)
+            if df.empty:
+                return None
+                
+            # اطمینان از وجود ستون close و تبدیل به عدد
+            if 'close' in df.columns:
+                df['close'] = df['close'].astype(float)
+            elif 'c' in df.columns:
+                df['close'] = df['c'].astype(float)
+            else:
+                return None
+                
+            return df
+        except Exception as e:
             return None
 
     def analyze(self, df):
-        if df is None or len(df) < 25:
+        if df is None or len(df) < 25 or 'close' not in df.columns:
             return None, ""
         
-        close = df['close'].astype(float)
+        close = df['close']
 
-        # محاسبه میانگین‌های متحرک سبک‌تر
+        # محاسبه میانگین‌های متحرک
         ema9 = close.ewm(span=9, adjust=False).mean()
         ema21 = close.ewm(span=21, adjust=False).mean()
 
@@ -107,11 +127,11 @@ class MasterXTBot:
         curr_ema21 = ema21.iloc[-1]
         prev_ema21 = ema21.iloc[-2]
 
-        # شرط بسیار ساده و روان (فقط تقاطع رو به بالا EMA9 از EMA21)
+        # شرط تقاطع صعودی روان
         cross_up = (prev_ema9 <= prev_ema21) and (curr_ema9 > curr_ema21)
 
         if cross_up:
-            return "BUY", "EMA9/21 CrossUp (Fast Mode)"
+            return "BUY", "EMA9/21 CrossUp (Optimized Fast Mode)"
         return None, ""
 
     def execute_trade(self, symbol, reason, price):
@@ -129,7 +149,7 @@ class MasterXTBot:
                 xt.send_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=quantity)
             except Exception as api_err:
                 if CHAT_ID:
-                    bot.send_message(CHAT_ID, f"⚠️ خطای API صرافی (Min Notional/Margin) در {symbol}: {api_err}")
+                    bot.send_message(CHAT_ID, f"⚠️ خطای API صرافی در {symbol}: {api_err}")
                 return
 
             tp1 = price * 1.01
@@ -158,7 +178,7 @@ def scheduler_task():
     while True:
         now = datetime.datetime.now()
         if CHAT_ID and (now - last_heartbeat).total_seconds() >= 600:
-            bot.send_message(CHAT_ID, "💓 ربات یکسره روشن و در حال پایش (5m)...")
+            bot.send_message(CHAT_ID, "💓 ربات یکسره روشن و در حال پایش بازار (5m)...")
             last_heartbeat = now
         time.sleep(30)
 
@@ -173,8 +193,8 @@ def trading_loop():
                         sig, reason = engine.analyze(df)
                         if sig == "BUY" and symbol not in active_positions:
                             engine.execute_trade(symbol, reason, df.iloc[-1]['close'])
-                    time.sleep(1.0)
-            time.sleep(3)
+                    time.sleep(0.5)
+            time.sleep(2)
         except Exception as e:
             print(f"Loop error: {e}")
             time.sleep(5)
@@ -197,7 +217,7 @@ def get_reply_keyboard():
 def start(message):
     bot.send_message(
         message.chat.id, 
-        "🤖 MasterXTBot فعال و حالت سریع (بدون فیلتر سنگین) فعال شد:", 
+        "🤖 MasterXTBot بروزرسانی و با ساختار ایمنِ داده‌ها فعال شد:", 
         reply_markup=get_reply_keyboard()
     )
 
@@ -222,7 +242,7 @@ def handle_text_buttons(message):
         bot.send_message(chat_id, f"📊 آمار امروز:\nتعداد معاملات: {trades}\nسود/زیان مجموع: {pnl} USDT\nنرخ موفقیت: {brain.data['win_rate']*100:.1f}%", reply_markup=get_reply_keyboard())
     elif text in ["📊 پوزیشن‌ها", "📈 تحلیل لحظه‌ای بازار"]:
         if not active_positions:
-            bot.send_message(chat_id, "📭 هیچ پوزیشن فعالی باز نیست (در حال اسکن سریع).", reply_markup=get_reply_keyboard())
+            bot.send_message(chat_id, "📭 هیچ پوزیشن فعالی باز نیست.", reply_markup=get_reply_keyboard())
         else:
             pos_msg = "📈 پوزیشن‌های فعال:\n"
             for sym, data in active_positions.items():
@@ -241,7 +261,7 @@ def handle_text_buttons(message):
         )
         bot.send_message(
             chat_id, 
-            f"⚙️ تنظیمات ریسک فعلی:\n- درصد سرمایه درگیر: {state['capital_percent']*100}%\n- اهرم (لوریج): {state['leverage']}x\n\nگزینه جدید را انتخاب کنید:",
+            f"⚙️ تنظیمات ریسک فعلی:\n- درصد سرمایه درگیر: {state['capital_percent']*100}%\n- اهرم: {state['leverage']}x\n\nگزینه جدید را انتخاب کنید:",
             reply_markup=markup
         )
     elif text.startswith("سرمایه: "):
