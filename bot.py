@@ -97,34 +97,21 @@ class MasterXTBot:
             return None, ""
         
         close = df['close'].astype(float)
-        volume = df['volume'].astype(float)
 
+        # محاسبه میانگین‌های متحرک سبک‌تر
         ema9 = close.ewm(span=9, adjust=False).mean()
         ema21 = close.ewm(span=21, adjust=False).mean()
-
-        delta = close.diff()
-        gain = delta.where(delta > 0, 0.0).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0.0)).rolling(window=14).mean()
-        rs = gain / (loss + 1e-10)
-        rsi = 100 - (100 / (1 + rs))
 
         curr_ema9 = ema9.iloc[-1]
         prev_ema9 = ema9.iloc[-2]
         curr_ema21 = ema21.iloc[-1]
         prev_ema21 = ema21.iloc[-2]
-        curr_rsi = rsi.iloc[-1]
 
-        vol_avg = volume.rolling(10).mean().iloc[-1]
-        vol_ok = volume.iloc[-1] > (vol_avg * 0.7 if pd.notna(vol_avg) else 0)
-
+        # شرط بسیار ساده و روان (فقط تقاطع رو به بالا EMA9 از EMA21)
         cross_up = (prev_ema9 <= prev_ema21) and (curr_ema9 > curr_ema21)
-        rsi_buy = curr_rsi < 45
 
-        if (cross_up or rsi_buy) and vol_ok:
-            reasons = []
-            if cross_up: reasons.append("EMA9/21 CrossUp")
-            if rsi_buy: reasons.append(f"RSI({curr_rsi:.1f})<45")
-            return "BUY", " + ".join(reasons) + " + VolOK"
+        if cross_up:
+            return "BUY", "EMA9/21 CrossUp (Fast Mode)"
         return None, ""
 
     def execute_trade(self, symbol, reason, price):
@@ -210,7 +197,7 @@ def get_reply_keyboard():
 def start(message):
     bot.send_message(
         message.chat.id, 
-        "🤖 MasterXTBot فعال و یکسره روی تایم 5m در حال پایش است. از دکمه‌های ثابت پایین استفاده کنید:", 
+        "🤖 MasterXTBot فعال و حالت سریع (بدون فیلتر سنگین) فعال شد:", 
         reply_markup=get_reply_keyboard()
     )
 
@@ -235,7 +222,7 @@ def handle_text_buttons(message):
         bot.send_message(chat_id, f"📊 آمار امروز:\nتعداد معاملات: {trades}\nسود/زیان مجموع: {pnl} USDT\nنرخ موفقیت: {brain.data['win_rate']*100:.1f}%", reply_markup=get_reply_keyboard())
     elif text in ["📊 پوزیشن‌ها", "📈 تحلیل لحظه‌ای بازار"]:
         if not active_positions:
-            bot.send_message(chat_id, "📭 هیچ پوزیشن فعالی باز نیست (در حال اسکن 5m).", reply_markup=get_reply_keyboard())
+            bot.send_message(chat_id, "📭 هیچ پوزیشن فعالی باز نیست (در حال اسکن سریع).", reply_markup=get_reply_keyboard())
         else:
             pos_msg = "📈 پوزیشن‌های فعال:\n"
             for sym, data in active_positions.items():
