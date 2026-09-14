@@ -101,7 +101,6 @@ class MasterXTBot:
                 print(f"❌ دیتافریم {symbol} خالی است.")
                 return None
                 
-            # چاپ نام ستون‌ها در کنسول سرور
             print(f"🔍 [دیباگ] اسم ستون‌های دریافتی برای {symbol}: {list(df.columns)}")
             
             if 'close' in df.columns:
@@ -176,6 +175,50 @@ class MasterXTBot:
             if CHAT_ID:
                 bot.send_message(CHAT_ID, f"❌ خطای ثبت ترید {symbol}: {e}")
 
+# --- تابع نظارت و مدیریت خودکار خروج (حد سود و حد ضرر) ---
+def manage_positions():
+    engine = MasterXTBot()
+    while True:
+        try:
+            if active_positions:
+                for symbol, pos in list(active_positions.items()):
+                    df = engine.get_data(symbol)
+                    if df is not None and not df.empty:
+                        current_price = float(df.iloc[-1]['close'])
+                        entry = pos['entry']
+                        sl = pos['sl']
+                        tp1 = pos['tp1']
+                        quantity = pos['quantity']
+                        
+                        # بررسی حد ضرر (Stop Loss)
+                        if current_price <= sl:
+                            try:
+                                xt.send_order(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
+                                del active_positions[symbol]
+                                state['daily_stats']['pnl'] -= (entry - current_price) * quantity
+                                brain.learn(False)
+                                if CHAT_ID:
+                                    bot.send_message(CHAT_ID, f"🛑 حد ضرر فعال شد! معامله {symbol} بسته شد.\n💰 قیمت خروج: {current_price}")
+                            except Exception as e:
+                                print(f"Error closing SL for {symbol}: {e}")
+                                
+                        # بررسی حد سود (Take Profit 1)
+                        elif current_price >= tp1:
+                            try:
+                                xt.send_order(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
+                                del active_positions[symbol]
+                                profit = (current_price - entry) * quantity
+                                state['daily_stats']['pnl'] += profit
+                                brain.learn(True)
+                                if CHAT_ID:
+                                    bot.send_message(CHAT_ID, f"🎯 حد سود (TP1) تاچ شد! معامله {symbol} بسته شد.\n💰 سود تقریبی: {profit:.2f} USDT")
+                            except Exception as e:
+                                print(f"Error closing TP for {symbol}: {e}")
+            time.sleep(5)
+        except Exception as e:
+            print(f"Position management error: {e}")
+            time.sleep(10)
+
 def scheduler_task():
     last_heartbeat = datetime.datetime.now()
     while True:
@@ -220,7 +263,7 @@ def get_reply_keyboard():
 def start(message):
     bot.send_message(
         message.chat.id, 
-        "🤖 MasterXTBot با سیستم دیباگ ستون‌ها فعال شد:", 
+        "🤖 MasterXTBot همراه با مدیریت خودکار TP/SL فعال شد:", 
         reply_markup=get_reply_keyboard()
     )
 
@@ -290,8 +333,10 @@ def handle_text_buttons(message):
         except Exception as e:
             bot.send_message(chat_id, f"🔴 خطا در اتصال صرافی: {e}", reply_markup=get_reply_keyboard())
 
+# راه‌اندازی تردهای موازی (پایش بازار، مدیریت پوزیشن‌ها و هارت‌بیت)
 threading.Thread(target=scheduler_task, daemon=True).start()
 threading.Thread(target=trading_loop, daemon=True).start()
+threading.Thread(target=manage_positions, daemon=True).start()
 
 if __name__ == "__main__":
     try:
