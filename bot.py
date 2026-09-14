@@ -87,9 +87,9 @@ class MasterXTBot:
         try:
             res = xt.get_kline(symbol, interval='5m', limit=50)
             if not res:
+                print(f"❌ داده‌ای برای {symbol} نیامد.")
                 return None
             
-            # پاک‌سازی و استخراج امن دیتافریم از خروجی صرافی
             data = res
             if isinstance(res, tuple) and len(res) > 1:
                 data = res[1]
@@ -98,18 +98,23 @@ class MasterXTBot:
                 
             df = pd.DataFrame(data)
             if df.empty:
+                print(f"❌ دیتافریم {symbol} خالی است.")
                 return None
                 
-            # اطمینان از وجود ستون close و تبدیل به عدد
+            # چاپ نام ستون‌ها در کنسول سرور
+            print(f"🔍 [دیباگ] اسم ستون‌های دریافتی برای {symbol}: {list(df.columns)}")
+            
             if 'close' in df.columns:
                 df['close'] = df['close'].astype(float)
             elif 'c' in df.columns:
                 df['close'] = df['c'].astype(float)
             else:
+                print(f"❌ ستون قیمت در {symbol} پیدا نشد! ستون‌های موجود: {list(df.columns)}")
                 return None
                 
             return df
         except Exception as e:
+            print(f"❌ خطا در get_data برای {symbol}: {e}")
             return None
 
     def analyze(self, df):
@@ -118,7 +123,6 @@ class MasterXTBot:
         
         close = df['close']
 
-        # محاسبه میانگین‌های متحرک
         ema9 = close.ewm(span=9, adjust=False).mean()
         ema21 = close.ewm(span=21, adjust=False).mean()
 
@@ -127,7 +131,6 @@ class MasterXTBot:
         curr_ema21 = ema21.iloc[-1]
         prev_ema21 = ema21.iloc[-2]
 
-        # شرط تقاطع صعودی روان
         cross_up = (prev_ema9 <= prev_ema21) and (curr_ema9 > curr_ema21)
 
         if cross_up:
@@ -217,7 +220,7 @@ def get_reply_keyboard():
 def start(message):
     bot.send_message(
         message.chat.id, 
-        "🤖 MasterXTBot بروزرسانی و با ساختار ایمنِ داده‌ها فعال شد:", 
+        "🤖 MasterXTBot با سیستم دیباگ ستون‌ها فعال شد:", 
         reply_markup=get_reply_keyboard()
     )
 
