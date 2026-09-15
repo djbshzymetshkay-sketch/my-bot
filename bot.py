@@ -127,7 +127,15 @@ state = {
 class MasterXTBot:
     def get_data(self, symbol):
         try:
-            res = xt.get_kline(symbol, interval='5m', limit=50)
+            # تلاش برای حالت‌های مختلف ارسال نام نماد جهت جلوگیری از خطای ساختار صرافی
+            res = None
+            for s_format in [symbol, symbol.upper(), symbol.replace("_", "-")]:
+                try:
+                    res = xt.get_kline(s_format, interval='5m', limit=50)
+                    if res: break
+                except:
+                    pass
+
             if not res:
                 return None
 
@@ -152,7 +160,8 @@ class MasterXTBot:
 
             df['close'] = df['close'].astype(float)
             return df
-        except Exception:
+        except Exception as e:
+            print(f"Error in get_data for {symbol}: {e}")
             return None
 
     def analyze(self, df):
@@ -349,7 +358,7 @@ def handle_text_buttons(message):
                 curr_price = float(df.iloc[-1]['close'])
                 engine.execute_trade("btc_usdt", "تست دستی و فوری صرافی", curr_price)
             else:
-                bot.send_message(chat_id, "⚠️ خطا در دریافت اطلاعات کندل بیت‌کوین.")
+                bot.send_message(chat_id, "⚠️ خطا در دریافت اطلاعات کندل بیت‌کوین. لطفاً چند لحظه دیگر دوباره امتحان کنید.")
         except Exception as e:
             bot.send_message(chat_id, f"❌ خطا در اجرای تست: {e}")
     elif text == "🛑 توقف اضطراری":
