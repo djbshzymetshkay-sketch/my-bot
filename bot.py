@@ -52,18 +52,40 @@ atexit.register(lambda: notify_shutdown("خاموش شدن عادی یا بست�
 def get_safe_balance():
     try:
         acc = xt.دریافت_سرمایه_حساب()
+        print(f"🔍 [Debug Balance Raw]: {acc}")
         data = acc
         if isinstance(acc, tuple) and len(acc) > 1:
             data = acc[1]
             
-        if isinstance(data, dict) and 'result' in data:
-            result_list = data['result']
-            if isinstance(result_list, list):
-                for item in result_list:
-                    if isinstance(item, dict) and item.get('coin') == 'usdt':
-                        bal = item.get('walletBalance') or item.get('availableBalance')
-                        if bal is not None:
-                            return float(bal)
+        # بررسی ساختار دیکشنری/لیست پاسخ XT
+        if isinstance(data, dict):
+            if 'result' in data:
+                res_val = data['result']
+                if isinstance(res_val, list):
+                    for item in res_val:
+                        if isinstance(item, dict):
+                            bal = item.get('walletBalance') or item.get('availableBalance') or item.get('balance') or item.get('equity')
+                            if bal is not None:
+                                return float(bal)
+                elif isinstance(res_val, dict):
+                    bal = res_val.get('walletBalance') or res_val.get('availableBalance') or res_val.get('balance')
+                    if bal is not None:
+                        return float(bal)
+            # کلیدهای مستقیم سطح اول
+            for k in ['walletBalance', 'availableBalance', 'balance', 'equity', 'usdt']:
+                if k in data and data[k] is not None:
+                    try:
+                        return float(data[k])
+                    except:
+                        pass
+        elif isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    bal = item.get('walletBalance') or item.get('availableBalance') or item.get('balance')
+                    if bal is not None:
+                        return float(bal)
+                        
+        print(f"⚠️ نتوانست موجودی را از ساختار استخراج کند، خروجی خام: {data}")
         return 1.56
     except Exception as e:
         print(f"Error fetching balance: {e}")
