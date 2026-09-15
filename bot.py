@@ -8,7 +8,6 @@ import atexit
 import hmac
 import hashlib
 import time as ttime
-import urllib.parse
 import requests
 import pandas as pd
 import pandas_ta as ta
@@ -44,16 +43,6 @@ def get_xt_headers(path, query_string="", body_string=""):
         "signature": signature,
         "Content-Type": "application/json"
     }
-
-def notify_shutdown(reason="نامشخص (ریست سرور یا توقف دستی)"):
-    if CHAT_ID and TELEGRAM_TOKEN:
-        try:
-            emergency_bot = telebot.TeleBot(TELEGRAM_TOKEN)
-            emergency_bot.send_message(CHAT_ID, f"⚠️ **هشدار: ربات متوقف شد!**\n\n🔴 دلیل توقف: {reason}")
-        except Exception as e:
-            print(f"Error sending shutdown message: {e}")
-
-atexit.register(lambda: notify_shutdown("خاموش شدن عادی یا بسته‌شدن اسکریپت"))
 
 def get_safe_balance():
     try:
@@ -259,7 +248,7 @@ def get_reply_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 MasterXTBot با دیباگ مستقیم فعال شد:", reply_markup=get_reply_keyboard())
+    bot.send_message(message.chat.id, "🤖 MasterXTBot فعال شد:", reply_markup=get_reply_keyboard())
 
 @bot.message_handler(func=lambda msg: True)
 def handle_text_buttons(message):
@@ -271,8 +260,10 @@ def handle_text_buttons(message):
         balance = get_safe_balance()
         bot.send_message(chat_id, f"💰 موجودی کیف پول: {balance} USDT", reply_markup=get_reply_keyboard())
     elif text == "🔄 ریست اتصال (رفع Conflict)":
-        bot.remove_webhook()
-        bot.send_message(chat_id, "🔄 وب‌هوک ریست شد.", reply_markup=get_reply_keyboard())
+        try:
+            bot.remove_webhook()
+        except Exception: pass
+        bot.send_message(chat_id, "🔄 ریست انجام شد.", reply_markup=get_reply_keyboard())
     else:
         bot.send_message(chat_id, "دستور دریافت شد.", reply_markup=get_reply_keyboard())
 
@@ -282,9 +273,11 @@ threading.Thread(target=manage_positions, daemon=True).start()
 if __name__ == "__main__":
     while True:
         try:
-            bot.remove_webhook()
+            try:
+                bot.remove_webhook()
+            except Exception: pass
             time.sleep(1)
-            bot.infinity_polling(timeout=60, long_polling_timeout=30)
+            bot.infinity_polling(timeout=60, long_polling_timeout=30, skip_pending=True)
         except Exception as e:
-            print(f"Polling crashed: {e}")
+            print(f"Polling warning/crash handled: {e}")
             time.sleep(5)
