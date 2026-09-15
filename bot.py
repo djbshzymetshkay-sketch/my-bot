@@ -163,7 +163,6 @@ class MasterXTBot:
         ema9 = close.ewm(span=9, adjust=False).mean()
         ema21 = close.ewm(span=21, adjust=False).mean()
         
-        # محاسبه RSI برای فیلتر هوشمند مومنتوم
         delta = close.diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -175,7 +174,6 @@ class MasterXTBot:
         curr_ema21 = ema21.iloc[-1]
         curr_rsi = rsi.iloc[-1] if not rsi.empty else 50
 
-        # شرایط متعادل و مناسب برای سیگنال‌دهی (نه خیلی سخت‌گیر، نه الکی)
         is_uptrend = curr_ema9 > curr_ema21
         price_above_ema = curr_close > curr_ema9
         not_overbought = curr_rsi < 75
@@ -291,11 +289,21 @@ def scheduler_task():
 
 def trading_loop():
     engine = MasterXTBot()
+    test_triggered = False  # تست دستی اولیه برای بررسی صحت عملکرد ترید
+    
     while True:
         try:
             if state['running']:
+                # باز کردن یک پوزیشن آزمایشی در اولین اجرا جهت تست نهایی
+                if not test_triggered and not active_positions:
+                    print("🧪 [تست دستی] در حال باز کردن یک پوزیشن تستی اولیه روی بیت‌کوین...")
+                    df = engine.get_data("btc_usdt")
+                    if df is not None and not df.empty:
+                        curr_price = float(df.iloc[-1]['close'])
+                        engine.execute_trade("btc_usdt", "تست دستی و اجباری اولیه ربات", curr_price)
+                        test_triggered = True
+
                 for symbol in SYMBOLS:
-                    # دیباگ جدید برای نمایش نام ارزی که ربات در حال بررسی آن است
                     print(f"🔎 [پایش بازار] در حال بررسی {symbol}...")
                     df = engine.get_data(symbol)
                     if df is not None:
@@ -327,7 +335,7 @@ def get_reply_keyboard():
 def start(message):
     bot.send_message(
         message.chat.id,
-        "🤖 MasterXTBot با استراتژی متعادل آماده کار است:",
+        "🤖 MasterXTBot با استراتژی متعادل و تست اولیه آماده کار است:",
         reply_markup=get_reply_keyboard()
     )
 
