@@ -4,6 +4,9 @@ import json
 import datetime
 import os
 import atexit
+import hmac
+import hashlib
+import requests
 import pandas as pd
 import telebot
 from telebot import types
@@ -69,10 +72,47 @@ def save_active_positions():
 active_positions = load_active_positions()
 state = {
     "running": False,
-    "capital_percent": 0.5,
+    "capital_percent": 0.25,
     "leverage": 50,
     "daily_stats": {"trades": 0, "pnl": 0.0}
 }
+
+def direct_xt_send_order(symbol, order_side, order_type, quantity, position_side):
+    """ارسال مستقیم و امن سفارش به API فیوچرز صرافی XT بدون وابستگی به باگ کتابخانه"""
+    endpoint = "/future/trade/v1/order/create"
+    url = f"https://fapi.xt.com{endpoint}"
+    
+    timestamp = str(int(time.time() * 1000))
+    
+    # فرمت صحیح پارامترها بر اساس مستندات رسمی صرافی XT
+    payload = {
+        "symbol": symbol.lower().replace("_", "-"),
+        "orderSide": order_side.upper(),      # BUY یا SELL
+        "orderType": order_type.upper(),      # MARKET یا LIMIT
+        "volume": str(quantity),              # حجم معامله
+        "positionSide": position_side.upper() # LONG یا SHORT
+    }
+    
+    body_str = json.dumps(payload, separators=(',', ':'))
+    
+    # ساخت امضای امنیتی صرافی XT
+    sign_str = f"accessKey={API_KEY}&params={body_str}&timestamp={timestamp}"
+    signature = hmac.new(SECRET_KEY.encode('utf-8'), sign_str.encode('utf-8'), hashlib.sha256).hexdigest()
+    
+    headers = {
+        "Content-Type": "application/json",
+        "xt-access-key": API_KEY,
+        "xt-timestamp": timestamp,
+        "xt-signature": signature
+    }
+    
+    response = requests.post(url, data=body_str, headers=headers, timeout=10)
+    res_json = response.json()
+    
+    if res_json.get('rc') != 0 and res_json.get('code') != 0 and res_json.get('success') is not True:
+        raise Exception(f"خطای صرافی XT: {res_json.get('msg') or res_json.get('message') or res_json}")
+        
+    return res_json
 
 class MasterXTBot:
     def get_data(self, symbol):
@@ -108,9 +148,6 @@ class MasterXTBot:
             print(f"Error: {e}")
             return None
 
-    def analyze(self, df):
-        return "BUY", "شرط تست صرافی"
-
     def execute_trade(self, symbol, reason, price):
         try:
             try:
@@ -126,30 +163,17 @@ class MasterXTBot:
             quantity = round(raw_qty, 3)
             if quantity <= 0: quantity = 0.001
 
-            print(f"🚀 ارسال به صرافی {symbol} | حجم: {quantity} | قیمت: {price}")
+            print(f"🚀 ارسال مستقیم سفارش به صرافی روی {symbol} با حجم {quantity}")
             
-            # ارسال مستقیم با دقیق‌ترین ساختار استاندارد متد صرافی
-            response = xt.send_order(
-                symbol=symbol,
-                order_side="BUY",
-                order_type="MARKET",
-                quantity=str(quantity),
+            # استفاده از روش کاملاً امن و مستقیم HTTP
+            order_res = direct_xt_send_order(
+                symbol=symbol, 
+                order_side="BUY", 
+                order_type="MARKET", 
+                quantity=quantity, 
                 position_side="LONG"
             )
-            
-            print(f"📥 پاسخ خام صرافی XT: {response}")
-            
-            # بررسی اینکه آیا صرافی واقعاً سفارش را قبول کرده یا ارور داده است
-            res_dict = response[1] if isinstance(response, tuple) and len(response) > 1 else response
-            if isinstance(res_dict, str):
-                try: res_dict = json.loads(res_dict)
-                except: pass
-
-            if isinstance(res_dict, dict):
-                code = res_dict.get('rc') or res_dict.get('code') or 0
-                if str(code) not in ('0', '200', 'SUCCESS', 'ok'):
-                    err_msg = res_dict.get('msg') or res_dict.get('message') or str(res_dict)
-                    raise Exception(f"پاسخ خطای صرافی: {err_msg}")
+            print(f"✅ نتیجه موفق صرافی: {order_res}")
 
             active_positions[symbol] = {"entry": price, "quantity": quantity}
             save_active_positions()
@@ -158,7 +182,7 @@ class MasterXTBot:
             if CHAT_ID:
                 bot.send_message(CHAT_ID, f"🚀 پوزیشن واقعی در صرافی باز شد!\n- نماد: {symbol}\n- قیمت ورود: {price}\n- حجم: {quantity}\n- اهرم: {state['leverage']}x")
         except Exception as e:
-            print(f"❌ خطای واقعی ثبت ترید در صرافی: {e}")
+            print(f"❌ خطای ثبت ترید در صرافی: {e}")
             if CHAT_ID:
                 bot.send_message(CHAT_ID, f"❌ خطا در ثبت ترید صرافی:\n{e}")
 
@@ -172,7 +196,7 @@ def trading_loop():
                         df = engine.get_data(symbol)
                         if df is not None:
                             current_price = float(df.iloc[-1]['close'])
-                            engine.execute_trade(symbol, "سیگنال ریتم بازار", current_price)
+                            engine.execute_trade(symbol, "سیگنال بازار", current_price)
                         time.sleep(30)
             time.sleep(5)
         except Exception as e:
@@ -232,7 +256,7 @@ def handle_text_buttons(message):
             types.KeyboardButton("اهرم: 10x"), types.KeyboardButton("اهرم: 50x"),
             types.KeyboardButton("🔙 بازگشت به منوی اصلی")
         )
-        bot.send_message(chat_id, f"⚙️ تنظیمات:\n- سرمایه: {state['capital_percent']*100}%\n- اهرم: {state['leverage']}x", reply_markup=markup)
+        bot.send_message(chat_id, f"⚙️ تنظیمات:\n- سرمایه: {state['capital_percent']*100}%\n- اهرم: {state['leverage']} حق", reply_markup=markup)
     elif text.startswith("سرمایه: "):
         try: state['capital_percent'] = int(text.replace("سرمایه: ", "").replace("%", "")) / 100.0
         except: pass
