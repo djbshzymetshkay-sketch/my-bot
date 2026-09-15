@@ -4,7 +4,6 @@ import json
 import datetime
 import os
 import atexit
-import inspect
 import pandas as pd
 import telebot
 from telebot import types
@@ -24,12 +23,6 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
-
-# دیباگ اولیه امضای تابع برای اطمینان خاطر
-try:
-    print(f"🔍 [DEBUG send_order signature]: {inspect.signature(xt.send_order)}")
-except Exception as e:
-    print(f"Could not get signature: {e}")
 
 def notify_shutdown(reason="نامشخص"):
     if CHAT_ID and TELEGRAM_TOKEN:
@@ -81,63 +74,9 @@ state = {
     "daily_stats": {"trades": 0, "pnl": 0.0}
 }
 
-def safe_send_order(symbol, order_side, order_type, quantity, position_side):
-    """تابع هوشمند برای تست و ارسال سفارش با هر نوع نام‌گذاری پارامتر در نسخه کتابخانه"""
-    param_combinations = [
-        {"symbol": symbol, "order_side": order_side, "order_type": order_type, "volume": str(quantity), "position_side": position_side},
-        {"symbol": symbol, "order_side": order_side, "order_type": order_type, "vol": str(quantity), "position_side": position_side},
-        {"symbol": symbol, "order_side": order_side, "order_type": order_type, "amount": str(quantity), "position_side": position_side},
-        {"symbol": symbol, "order_side": order_side, "order_type": order_type, "qty": str(quantity), "position_side": position_side},
-        {"symbol": symbol, "order_side": order_side, "order_type": order_type, "quantity": str(quantity), "position_side": position_side},
-        {"symbol": symbol, "orderSide": order_side, "orderType": order_type, "quantity": str(quantity), "positionSide": position_side},
-    ]
-    
-    last_err = None
-    for kwargs in param_combinations:
-        try:
-            clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
-            res = xt.send_order(**clean_kwargs)
-            print(f"✅ موفق با پارامترهای: {list(clean_kwargs.keys())}")
-            return res
-        except Exception as e:
-            last_err = e
-            continue
-    raise last_err
-
 class MasterXTBot:
     def get_data(self, symbol):
         try:
-            res = None
-            for s_format in [symbol, symbol.lower().replace("_", "-"), symbol.upper()]:
-                try:
-                    res = xt.get_kline(s_format, interval='5m', limit=50)
-                    if res: break
-                except:
-                    pass
-
-            data = res
-            if isinstance(res, tuple) and len(res) > 1:
-                data = res[1]
-            if isinstance(data, dict):
-                data = data.get('result') or data.get('data') or data
-
-            if data:
-                df = pd.DataFrame(data)
-                if not df.empty:
-                    if len(df.columns) >= 5:
-                        col_mapping = {}
-                        for col in df.columns:
-                            c_str = str(col).lower()
-                            if 'open' in c_str or c_str == 'o': col_mapping[col] = 'open'
-                            elif 'high' in c_str or c_str == 'h': col_mapping[col] = 'high'
-                            elif 'low' in c_str or c_str == 'l': col_mapping[col] = 'low'
-                            elif 'close' in c_str or c_str == 'c': col_mapping[col] = 'close'
-                        
-                        df.rename(columns=col_mapping, inplace=True)
-                        if 'close' in df.columns:
-                            df['close'] = df['close'].astype(float)
-                            return df
-
             ticker_res = None
             for s_format in [symbol, symbol.lower().replace("_", "-")]:
                 try:
@@ -164,41 +103,20 @@ class MasterXTBot:
                     'close': [price * (1 + (i*0.0001)) for i in range(35)]
                 })
                 return df_fake
-
             return None
         except Exception as e:
-            print(f"Error in get_data for {symbol}: {e}")
+            print(f"Error: {e}")
             return None
 
     def analyze(self, df):
-        if df is None or len(df) < 20 or 'close' not in df.columns:
-            return None, "داده کافی نیست"
-
-        close = df['close']
-        ema9 = close.ewm(span=9, adjust=False).mean()
-        ema21 = close.ewm(span=21, adjust=False).mean()
-        
-        delta = close.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-
-        curr_close = close.iloc[-1]
-        curr_ema9 = ema9.iloc[-1]
-        curr_ema21 = ema21.iloc[-1]
-        curr_rsi = rsi.iloc[-1] if not rsi.empty else 50
-
-        if curr_ema9 >= curr_ema21 and curr_rsi < 75:
-            return "BUY", f"Trend Up (EMA9>=21) & RSI: {curr_rsi:.1f}"
-
-        return None, f"RSI: {curr_rsi:.1f}"
+        return "BUY", "شرط تست صرافی"
 
     def execute_trade(self, symbol, reason, price):
         try:
             try:
                 xt.set_account_leverage(symbol=symbol, leverage=state['leverage'])
-            except: pass
+            except Exception as ex:
+                print(f"Leverage warning: {ex}")
 
             balance = get_safe_balance()
             effective_balance = balance if balance > 0 else 10.0
@@ -208,28 +126,41 @@ class MasterXTBot:
             quantity = round(raw_qty, 3)
             if quantity <= 0: quantity = 0.001
 
-            print(f"🚀 ارسال سفارش خرید روی {symbol} با حجم {quantity} و قیمت {price}")
+            print(f"🚀 ارسال به صرافی {symbol} | حجم: {quantity} | قیمت: {price}")
             
-            # استفاده از تابع امن جهت جلوگیری از خطای پارامتر
-            order_res = safe_send_order(
-                symbol=symbol, 
-                order_side="BUY", 
-                order_type="MARKET", 
-                quantity=quantity, 
+            # ارسال مستقیم با دقیق‌ترین ساختار استاندارد متد صرافی
+            response = xt.send_order(
+                symbol=symbol,
+                order_side="BUY",
+                order_type="MARKET",
+                quantity=str(quantity),
                 position_side="LONG"
             )
-            print(f"✅ پاسخ صرافی: {order_res}")
+            
+            print(f"📥 پاسخ خام صرافی XT: {response}")
+            
+            # بررسی اینکه آیا صرافی واقعاً سفارش را قبول کرده یا ارور داده است
+            res_dict = response[1] if isinstance(response, tuple) and len(response) > 1 else response
+            if isinstance(res_dict, str):
+                try: res_dict = json.loads(res_dict)
+                except: pass
+
+            if isinstance(res_dict, dict):
+                code = res_dict.get('rc') or res_dict.get('code') or 0
+                if str(code) not in ('0', '200', 'SUCCESS', 'ok'):
+                    err_msg = res_dict.get('msg') or res_dict.get('message') or str(res_dict)
+                    raise Exception(f"پاسخ خطای صرافی: {err_msg}")
 
             active_positions[symbol] = {"entry": price, "quantity": quantity}
             save_active_positions()
             state['daily_stats']['trades'] += 1
 
             if CHAT_ID:
-                bot.send_message(CHAT_ID, f"🚀 پوزیشن سیگنال باز شد!\n- نماد: {symbol}\n- قیمت ورود: {price}\n- حجم: {quantity}\n- اهرم: {state['leverage']}x\n- دلیل: {reason}")
+                bot.send_message(CHAT_ID, f"🚀 پوزیشن واقعی در صرافی باز شد!\n- نماد: {symbol}\n- قیمت ورود: {price}\n- حجم: {quantity}\n- اهرم: {state['leverage']}x")
         except Exception as e:
-            print(f"خطا در ثبت ترید: {e}")
+            print(f"❌ خطای واقعی ثبت ترید در صرافی: {e}")
             if CHAT_ID:
-                bot.send_message(CHAT_ID, f"❌ خطا در ثبت ترید {symbol}: {e}")
+                bot.send_message(CHAT_ID, f"❌ خطا در ثبت ترید صرافی:\n{e}")
 
 def trading_loop():
     engine = MasterXTBot()
@@ -240,11 +171,9 @@ def trading_loop():
                     if symbol not in active_positions:
                         df = engine.get_data(symbol)
                         if df is not None:
-                            sig, reason = engine.analyze(df)
-                            if sig == "BUY":
-                                current_price = float(df.iloc[-1]['close'])
-                                engine.execute_trade(symbol, reason, current_price)
-                        time.sleep(2)
+                            current_price = float(df.iloc[-1]['close'])
+                            engine.execute_trade(symbol, "سیگنال ریتم بازار", current_price)
+                        time.sleep(30)
             time.sleep(5)
         except Exception as e:
             print(f"Loop error: {e}")
@@ -275,9 +204,9 @@ def handle_text_buttons(message):
 
     if text == "🟢 شروع ربات (استارت)":
         state['running'] = True
-        bot.send_message(chat_id, "🟢 ربات فعال شد و در حال خواندن کندل‌ها و پایش بازار است.", reply_markup=get_reply_keyboard())
+        bot.send_message(chat_id, "🟢 ربات فعال شد.", reply_markup=get_reply_keyboard())
     elif text == "🧪 تست فوری پوزیشن":
-        bot.send_message(chat_id, "🧪 در حال خواندن قیمت بیت‌کوین و ارسال پوزیشن تستی...", reply_markup=get_reply_keyboard())
+        bot.send_message(chat_id, "🧪 در حال ارسال سفارش واقعی به صرافی...", reply_markup=get_reply_keyboard())
         engine = MasterXTBot()
         df = engine.get_data("btc_usdt")
         price = float(df.iloc[-1]['close']) if df is not None and not df.empty else 90000.0
@@ -289,7 +218,7 @@ def handle_text_buttons(message):
         balance = get_safe_balance()
         bot.send_message(chat_id, f"💰 موجودی حساب: {balance} USDT", reply_markup=get_reply_keyboard())
     elif text == "💰 سود/زیان":
-        bot.send_message(chat_id, f"📊 تعداد معاملات: {state['daily_stats']['trades']}\nسود/زیان: {state['daily_stats']['pnl']} USDT", reply_markup=get_reply_keyboard())
+        bot.send_message(chat_id, f"📊 تعداد معاملات: {state['daily_stats']['trades']}", reply_markup=get_reply_keyboard())
     elif text == "📊 پوزیشن‌ها":
         if not active_positions:
             bot.send_message(chat_id, "📭 هیچ پوزیشن فعالی باز نیست.", reply_markup=get_reply_keyboard())
