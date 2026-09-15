@@ -98,10 +98,9 @@ def save_active_positions():
 brain = Brain()
 active_positions = load_active_positions()
 
-# ⚠️ ربات در حالت پیش‌فرض متوقف است تا زمانی که خودتان استارت کنید
 state = {
     "running": False,
-    "capital_percent": 0.5,
+    "capital_percent": 0.25,
     "leverage": 50,
     "daily_stats": {"trades": 0, "pnl": 0.0}
 }
@@ -154,9 +153,13 @@ class MasterXTBot:
             capital_in_trade = effective_balance * state['capital_percent']
             quantity = round((capital_in_trade * state['leverage']) / price, 3)
 
-            if quantity <= 0: return
+            if quantity <= 0: 
+                print(f"🚫 حجم معامله برای {symbol} صفر یا کمتر است.")
+                if CHAT_ID: bot.send_message(CHAT_ID, f"🚫 خطای حجم معامله {symbol}: موجودی حساب برای باز کردن پوزیشن کافی نیست.")
+                return
 
             order_res = xt.send_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=str(quantity), positionSide="LONG")
+            print(f"✅ نتیجه سفارش: {order_res}")
             
             tp1 = price * 1.01
             sl = price * 0.98
@@ -165,9 +168,10 @@ class MasterXTBot:
             state['daily_stats']['trades'] += 1
 
             if CHAT_ID:
-                bot.send_message(CHAT_ID, f"🚀 پوزیشن جدید: {symbol}\n💰 ورود: {price}\n⚡️ اهرم: {state['leverage']}x\n📊 حجم: {quantity}")
+                bot.send_message(CHAT_ID, f"🚀 پوزیشن تستی/جدید: {symbol}\n💰 ورود: {price}\n⚡️ اهرم: {state['leverage']}x\n📊 حجم: {quantity}\n🧠 دلیل: {reason}")
         except Exception as e:
-            if CHAT_ID: bot.send_message(CHAT_ID, f"❌ خطای ترید {symbol}: {e}")
+            print(f"❌ خطای ترید {symbol}: {e}")
+            if CHAT_ID: bot.send_message(CHAT_ID, f"❌ خطای ثبت ترید {symbol}: {e}")
 
 def manage_positions():
     engine = MasterXTBot()
@@ -198,7 +202,7 @@ def trading_loop():
                             engine.execute_trade(symbol, reason, df.iloc[-1]['close'])
                     time.sleep(0.5)
             else:
-                time.sleep(3) # اگر متوقف بود منتظر می‌ماند
+                time.sleep(3)
         except: time.sleep(5)
 
 def get_reply_keyboard():
@@ -217,7 +221,7 @@ def get_reply_keyboard():
 def start(message):
     bot.send_message(
         message.chat.id,
-        "🤖 ربات آماده است. برای شروع فعالیت دکمه '🟢 شروع ربات (استارت)' را بزنید:",
+        "🤖 ربات آماده است. برای شروع و ارسال تست آنی، دکمه زیر را بزنید:",
         reply_markup=get_reply_keyboard()
     )
 
@@ -228,7 +232,20 @@ def handle_text_buttons(message):
 
     if text == "🟢 شروع ربات (استارت)":
         state['running'] = True
-        bot.send_message(chat_id, f"🟢 ربات با موفقیت فعال شد!\n⚡️ اهرم تنظیم‌شده: {state['leverage']}x\n💰 درصد سرمایه: {state['capital_percent']*100}%\n\nدر حال پایش بازار...", reply_markup=get_reply_keyboard())
+        bot.send_message(chat_id, f"🟢 ربات فعال شد!\n⚡️ اهرم: {state['leverage']}x\n💰 سرمایه: {state['capital_percent']*100}%\n\n🧪 در حال ارسال پوزیشن تستی روی بیت‌کوین...", reply_markup=get_reply_keyboard())
+        
+        # اجرای تست فوری و ارسال پوزیشن روی بیت‌کوین به محض استارت
+        try:
+            engine = MasterXTBot()
+            df = engine.get_data("btc_usdt")
+            if df is not None and not df.empty:
+                curr_price = float(df.iloc[-1]['close'])
+                engine.execute_trade("btc_usdt", "تست دستی و فوری هنگام استارت", curr_price)
+            else:
+                bot.send_message(chat_id, "⚠️ خطا در دریافت اطلاعات کندل بیت‌کوین برای تست.")
+        except Exception as e:
+            bot.send_message(chat_id, f"❌ خطا در اجرای پوزیشن تستی: {e}")
+
     elif text == "🛑 توقف اضطراری":
         state['running'] = False
         bot.send_message(chat_id, "🔴 ربات متوقف شد.", reply_markup=get_reply_keyboard())
