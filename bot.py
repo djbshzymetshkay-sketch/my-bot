@@ -30,7 +30,7 @@ xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 
 # --- دیباگ پیشرفته: بررسی Signature متدهای کلیدی SDK ---
 print("🔍 --- [دیباگ] بررسی ورودی‌های متدهای کلیدی SDK ---")
-for m_name in ['دریافت_سرمایه_حساب', 'تنظیم_اهرم_حساب', 'ارسال_فعال_سفارش']:
+for m_name in ['get_account_balance', 'set_account_leverage', 'place_active_order']:
     if hasattr(xt, m_name):
         try:
             sig = inspect.signature(getattr(xt, m_name))
@@ -51,7 +51,7 @@ atexit.register(lambda: notify_shutdown("خاموش شدن عادی یا بست�
 
 def get_safe_balance():
     try:
-        acc = xt.دریافت_سرمایه_حساب()
+        acc = xt.get_account_balance()
         print(f"🔍 [Debug Balance Raw]: {repr(acc)}")
         
         data = acc
@@ -138,7 +138,6 @@ def save_active_positions():
     except Exception as e:
         print(f"Error saving positions file: {e}")
 
-brain = Brain()
 active_positions = load_active_positions()
 state = {
     "running": True,
@@ -166,7 +165,7 @@ class MasterXTBot:
             df = pd.DataFrame(data)
             if df.empty:
                 return None
-                
+            
             if 'c' in df.columns:
                 df['close'] = df['c'].astype(float)
             elif 'close' in df.columns:
@@ -202,7 +201,7 @@ class MasterXTBot:
     def execute_trade(self, symbol, reason, price):
         try:
             try:
-                xt.تنظیم_اهرم_حساب(symbol=symbol, leverage=state['leverage'])
+                xt.set_account_leverage(symbol=symbol, leverage=state['leverage'])
             except Exception as lev_err:
                 print(f"⚠️ هشدار تنظیم اهرم برای {symbol}: {lev_err}")
 
@@ -211,7 +210,7 @@ class MasterXTBot:
             quantity = (capital_in_trade * state['leverage']) / price if price > 0 else 0
             
             try:
-                xt.ارسال_فعال_سفارش(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=quantity)
+                xt.place_active_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=quantity)
             except Exception as api_err:
                 if CHAT_ID:
                     bot.send_message(CHAT_ID, f"⚠️ خطای API صرافی در {symbol}: {api_err}")
@@ -255,7 +254,7 @@ def manage_positions():
                         
                         if current_price <= sl:
                             try:
-                                xt.ارسال_فعال_سفارش(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
+                                xt.place_active_order(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
                                 del active_positions[symbol]
                                 save_active_positions()
                                 state['daily_stats']['pnl'] -= (entry - current_price) * quantity
@@ -267,7 +266,7 @@ def manage_positions():
                                 
                         elif current_price >= tp1:
                             try:
-                                xt.ارسال_فعال_سفارش(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
+                                xt.place_active_order(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
                                 del active_positions[symbol]
                                 save_active_positions()
                                 profit = (current_price - entry) * quantity
@@ -398,24 +397,3 @@ def handle_text_buttons(message):
             balance = get_safe_balance()
             bot.send_message(chat_id, f"🟢 اتصال برقرار است.\n💰 موجودی کیف پول: {balance} USDT", reply_markup=get_reply_keyboard())
         except Exception as e:
-            bot.send_message(chat_id, f"🔴 خطا در اتصال صرافی: {e}", reply_markup=get_reply_keyboard())
-    elif text == "🔄 ریست اتصال (رفع Conflict)":
-        try:
-            bot.remove_webhook()
-            bot.send_message(chat_id, "🔄 وب‌هوک/پویینگ ریست شد.", reply_markup=get_reply_keyboard())
-        except Exception as e:
-            bot.send_message(chat_id, f"خطا در ریست: {e}", reply_markup=get_reply_keyboard())
-
-threading.Thread(target=scheduler_task, daemon=True).start()
-threading.Thread(target=trading_loop, daemon=True).start()
-threading.Thread(target=manage_positions, daemon=True).start()
-
-if __name__ == "__main__":
-    while True:
-        try:
-            bot.remove_webhook()
-            time.sleep(1)
-            bot.infinity_polling(timeout=60, long_polling_timeout=30)
-        except Exception as e:
-            print(f"Polling crashed: {e}, restarting in 5s...")
-            time.sleep(5)
