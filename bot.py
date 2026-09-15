@@ -11,11 +11,11 @@ import pandas as pd
 import telebot
 from telebot import types
 
-# --- پیکربندی ---
-API_KEY = os.environ.get("XT_API_KEY", "11bfe446-a063-4ee0-8871-d7ecfd612db6")
-SECRET_KEY = os.environ.get("XT_SECRET_KEY", "f4442716939deb0ff2415e88503d26fc663c2738")
-TELEGRAM_TOKEN = os.environ.get("TOKEN", "8763614980:AAGIQXQtT7OkEmehPcaKeDYz6puNUjZeDGU")
-CHAT_ID = os.environ.get("CHAT_ID")
+# --- تنظیمات ---
+API_KEY = "11bfe446-a063-4ee0-8871-d7ecfd612db6"
+SECRET_KEY = "f4442716939deb0ff2415e88503d26fc663c2738"
+TELEGRAM_TOKEN = "8763614980:AAGIQXQtT7OkEmehPcaKeDYz6puNUjZeDGU"
+CHAT_ID = ""  # اگر چت‌آیدیتان را دارید اینجا وارد کنید یا بگذارید خالی بماند تا ربات ارور ندهد
 POSITIONS_FILE = "active_positions.json"
 
 SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt", "ada_usdt",
@@ -28,13 +28,13 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 def notify_shutdown(reason="نامشخص"):
     if CHAT_ID and TELEGRAM_TOKEN:
         try:
-            telebot.TeleBot(TELEGRAM_TOKEN).send_message(CHAT_ID, f"⚠️ **هشدار: ربات متوقف شد!**\n\n🔴 دلیل: {reason}")
+            bot.send_message(CHAT_ID, f"⚠️ **هشدار: ربات متوقف شد!**\n\n🔴 دلیل: {reason}")
         except: pass
 
 atexit.register(lambda: notify_shutdown("خاموش شدن اسکریپت"))
 
 def xt_request(method, endpoint, params=None):
-    """ارسال درخواست استاندارد به API صرافی XT با امضای صحیح"""
+    """تابع استاندارد ارتباط با صرافی XT با رعایت دقیق فرمت امضا"""
     url = f"https://fapi.xt.com{endpoint}"
     timestamp = str(int(time.time() * 1000))
     
@@ -47,9 +47,9 @@ def xt_request(method, endpoint, params=None):
         signature = hmac.new(SECRET_KEY.encode('utf-8'), sign_str.encode('utf-8'), hashlib.sha256).hexdigest()
         
         headers = {
-            "xt-access-key": API_KEY,
-            "xt-timestamp": timestamp,
-            "xt-signature": signature
+            "validate-appKey": API_KEY,
+            "validate-timestamp": timestamp,
+            "validate-signature": signature
         }
         response = requests.get(url, headers=headers, timeout=10)
     else:
@@ -59,9 +59,9 @@ def xt_request(method, endpoint, params=None):
         
         headers = {
             "Content-Type": "application/json",
-            "xt-access-key": API_KEY,
-            "xt-timestamp": timestamp,
-            "xt-signature": signature
+            "validate-appKey": API_KEY,
+            "validate-timestamp": timestamp,
+            "validate-signature": signature
         }
         response = requests.post(url, data=body_str, headers=headers, timeout=10)
         
@@ -79,7 +79,7 @@ def get_safe_balance():
             return float(result.get('walletBalance') or result.get('availableBalance') or 0)
         return 0.0
     except Exception as e:
-        print(f"❌ خطای موجودی: {e}")
+        print(f"خطای موجودی: {e}")
         return 0.0
 
 def load_active_positions():
@@ -105,7 +105,7 @@ state = {
 class MasterXTBot:
     def get_data(self, symbol):
         try:
-            res = xt_request("GET", f"/future/market/v1/public/ticker/price", {"symbol": symbol.lower().replace("_", "-")})
+            res = xt_request("GET", "/future/market/v1/public/ticker/price", {"symbol": symbol.lower().replace("_", "-")})
             t_data = res.get('result') or res.get('data')
             price = 0.0
             if isinstance(t_data, dict):
@@ -130,7 +130,7 @@ class MasterXTBot:
         try:
             formatted_symbol = symbol.lower().replace("_", "-")
             
-            # تنظیم اهرم
+            # تنظیم اهرم معامله
             try:
                 xt_request("POST", "/future/trade/v1/leverage/adjust", {
                     "symbol": formatted_symbol,
@@ -147,9 +147,8 @@ class MasterXTBot:
             quantity = round(raw_qty, 3)
             if quantity <= 0: quantity = 0.001
 
-            print(f"🚀 ارسال سفارش واقعی به صرافی روی {formatted_symbol} با حجم {quantity}")
+            print(f"ارسال سفارش به صرافی روی {formatted_symbol} با حجم {quantity}")
             
-            # ثبت پوزیشن بازار (Market Order)
             payload = {
                 "symbol": formatted_symbol,
                 "orderSide": "BUY",
@@ -162,7 +161,7 @@ class MasterXTBot:
             if order_res.get('rc') != 0 and order_res.get('code') != 0:
                 raise Exception(f"خطای صرافی: {order_res.get('msg') or order_res}")
 
-            print(f"✅ پوزیشن با موفقیت باز شد: {order_res}")
+            print(f"پوزیشن با موفقیت باز شد: {order_res}")
             active_positions[symbol] = {"entry": price, "quantity": quantity}
             save_active_positions()
             state['daily_stats']['trades'] += 1
@@ -170,7 +169,7 @@ class MasterXTBot:
             if CHAT_ID:
                 bot.send_message(CHAT_ID, f"🚀 پوزیشن واقعی در صرافی باز شد!\n- نماد: {symbol}\n- قیمت ورود: {price}\n- حجم: {quantity}\n- اهرم: {state['leverage']}x")
         except Exception as e:
-            print(f"❌ خطای ثبت ترید در صرافی: {e}")
+            print(f"خطای ثبت ترید در صرافی: {e}")
             if CHAT_ID:
                 bot.send_message(CHAT_ID, f"❌ خطا در ثبت ترید صرافی:\n{e}")
 
@@ -255,7 +254,7 @@ def handle_text_buttons(message):
         bot.send_message(chat_id, "منوی اصلی:", reply_markup=get_reply_keyboard())
     elif text == "🟢 وضعیت اتصال صرافی":
         balance = get_safe_balance()
-        bot.send_message(chat_id, f"🟢 متصل است.\n💰 موجودی: {balance} USDT", reply_markup=get_reply_keyboard())
+        bot.send_message(chat_id, f"🟢 متصل است.\n💰 موجودی: {balance} USDT", reply_markup=get_reply_gateway := get_reply_keyboard())
 
 threading.Thread(target=trading_loop, daemon=True).start()
 
