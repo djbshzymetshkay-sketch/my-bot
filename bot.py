@@ -4,6 +4,7 @@ import json
 import datetime
 import os
 import atexit
+import inspect
 import pandas as pd
 import telebot
 from telebot import types
@@ -23,6 +24,12 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
+
+# دیباگ اولیه امضای تابع برای اطمینان خاطر
+try:
+    print(f"🔍 [DEBUG send_order signature]: {inspect.signature(xt.send_order)}")
+except Exception as e:
+    print(f"Could not get signature: {e}")
 
 def notify_shutdown(reason="نامشخص"):
     if CHAT_ID and TELEGRAM_TOKEN:
@@ -74,9 +81,31 @@ state = {
     "daily_stats": {"trades": 0, "pnl": 0.0}
 }
 
+def safe_send_order(symbol, order_side, order_type, quantity, position_side):
+    """تابع هوشمند برای تست و ارسال سفارش با هر نوع نام‌گذاری پارامتر در نسخه کتابخانه"""
+    param_combinations = [
+        {"symbol": symbol, "order_side": order_side, "order_type": order_type, "volume": str(quantity), "position_side": position_side},
+        {"symbol": symbol, "order_side": order_side, "order_type": order_type, "vol": str(quantity), "position_side": position_side},
+        {"symbol": symbol, "order_side": order_side, "order_type": order_type, "amount": str(quantity), "position_side": position_side},
+        {"symbol": symbol, "order_side": order_side, "order_type": order_type, "qty": str(quantity), "position_side": position_side},
+        {"symbol": symbol, "order_side": order_side, "order_type": order_type, "quantity": str(quantity), "position_side": position_side},
+        {"symbol": symbol, "orderSide": order_side, "orderType": order_type, "quantity": str(quantity), "positionSide": position_side},
+    ]
+    
+    last_err = None
+    for kwargs in param_combinations:
+        try:
+            clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
+            res = xt.send_order(**clean_kwargs)
+            print(f"✅ موفق با پارامترهای: {list(clean_kwargs.keys())}")
+            return res
+        except Exception as e:
+            last_err = e
+            continue
+    raise last_err
+
 class MasterXTBot:
     def get_data(self, symbol):
-        """دریافت صحیح کندل‌ها و قیمت از صرافی"""
         try:
             res = None
             for s_format in [symbol, symbol.lower().replace("_", "-"), symbol.upper()]:
@@ -109,7 +138,6 @@ class MasterXTBot:
                             df['close'] = df['close'].astype(float)
                             return df
 
-            # روش اضطراری خواندن قیمت زنده اگر کندل مستقیم نیامد
             ticker_res = None
             for s_format in [symbol, symbol.lower().replace("_", "-")]:
                 try:
@@ -143,7 +171,6 @@ class MasterXTBot:
             return None
 
     def analyze(self, df):
-        """تحلیل کندل‌ها با EMA و RSI"""
         if df is None or len(df) < 20 or 'close' not in df.columns:
             return None, "داده کافی نیست"
 
@@ -183,12 +210,12 @@ class MasterXTBot:
 
             print(f"🚀 ارسال سفارش خرید روی {symbol} با حجم {quantity} و قیمت {price}")
             
-            # اصلاح نام پارامترها به فرمت استاندارد کتابخانه pyxt (استفاده از زیرخط)
-            order_res = xt.send_order(
+            # استفاده از تابع امن جهت جلوگیری از خطای پارامتر
+            order_res = safe_send_order(
                 symbol=symbol, 
                 order_side="BUY", 
                 order_type="MARKET", 
-                quantity=str(quantity), 
+                quantity=quantity, 
                 position_side="LONG"
             )
             print(f"✅ پاسخ صرافی: {order_res}")
