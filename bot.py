@@ -76,20 +76,16 @@ state = {
 
 class MasterXTBot:
     def get_data(self, symbol):
-        """دریافت صحیح کندل‌ها و قیمت از صرافی با تست الگوهای مختلف"""
+        """دریافت صحیح کندل‌ها و قیمت از صرافی"""
         try:
             res = None
-            # تست حالت‌های مختلف نوشتن نام نماد در صرافی XT (مثل با خط تیره یا حروف بزرگ)
             for s_format in [symbol, symbol.lower().replace("_", "-"), symbol.upper()]:
                 try:
-                    # تلاش برای دریافت کندل
                     res = xt.get_kline(s_format, interval='5m', limit=50)
-                    if res: 
-                        break
+                    if res: break
                 except:
                     pass
 
-            # اگر با متد کلاینت کندل نگرفت، ساختار داده را هندل می‌کنیم
             data = res
             if isinstance(res, tuple) and len(res) > 1:
                 data = res[1]
@@ -99,13 +95,7 @@ class MasterXTBot:
             if data:
                 df = pd.DataFrame(data)
                 if not df.empty:
-                    # استانداردسازی ستون‌های کندل
                     if len(df.columns) >= 5:
-                        # اگر لیست خالص باشد
-                        if not isinstance(data, pd.DataFrame):
-                            df = pd.DataFrame(data)
-                        
-                        # تغییر نام ستون‌های احتمالی صرافی به فرمت استاندارد
                         col_mapping = {}
                         for col in df.columns:
                             c_str = str(col).lower()
@@ -119,7 +109,7 @@ class MasterXTBot:
                             df['close'] = df['close'].astype(float)
                             return df
 
-            # روش جایگزین اضطراری برای جلوگیری از خالی ماندن: اگر کندل مستقیم نیامد، از تقیمت تیکر زنده استفاده می‌کنیم و یک دیتافریم مصنوعی معتبر می‌سازیم
+            # روش اضطراری خواندن قیمت زنده اگر کندل مستقیم نیامد
             ticker_res = None
             for s_format in [symbol, symbol.lower().replace("_", "-")]:
                 try:
@@ -139,7 +129,6 @@ class MasterXTBot:
                 price = float(t_data[0].get('price') or t_data[0].get('lastPrice') or 0)
 
             if price and price > 0:
-                # ساخت یک دیتافریم ساختگی بر اساس قیمت واقعی لحظه‌ای بازار برای کار کردن اندیکاتورها
                 df_fake = pd.DataFrame({
                     'open': [price * 0.99] * 35,
                     'high': [price * 1.01] * 35,
@@ -154,7 +143,7 @@ class MasterXTBot:
             return None
 
     def analyze(self, df):
-        """تحلیل دقیق کندل‌ها با اندیکاتور EMA و RSI"""
+        """تحلیل کندل‌ها با EMA و RSI"""
         if df is None or len(df) < 20 or 'close' not in df.columns:
             return None, "داده کافی نیست"
 
@@ -173,7 +162,6 @@ class MasterXTBot:
         curr_ema21 = ema21.iloc[-1]
         curr_rsi = rsi.iloc[-1] if not rsi.empty else 50
 
-        # شرط سیگنال خرید
         if curr_ema9 >= curr_ema21 and curr_rsi < 75:
             return "BUY", f"Trend Up (EMA9>=21) & RSI: {curr_rsi:.1f}"
 
@@ -194,7 +182,15 @@ class MasterXTBot:
             if quantity <= 0: quantity = 0.001
 
             print(f"🚀 ارسال سفارش خرید روی {symbol} با حجم {quantity} و قیمت {price}")
-            order_res = xt.send_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=str(quantity), positionSide="LONG")
+            
+            # اصلاح نام پارامترها به فرمت استاندارد کتابخانه pyxt (استفاده از زیرخط)
+            order_res = xt.send_order(
+                symbol=symbol, 
+                order_side="BUY", 
+                order_type="MARKET", 
+                quantity=str(quantity), 
+                position_side="LONG"
+            )
             print(f"✅ پاسخ صرافی: {order_res}")
 
             active_positions[symbol] = {"entry": price, "quantity": quantity}
@@ -243,7 +239,7 @@ def get_reply_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 ربات با سیستم تحلیل کندل و استعلام هوشمند آماده است:", reply_markup=get_reply_keyboard())
+    bot.send_message(message.chat.id, "🤖 ربات آماده است:", reply_markup=get_reply_keyboard())
 
 @bot.message_handler(func=lambda msg: True)
 def handle_text_buttons(message):
