@@ -289,20 +289,21 @@ def scheduler_task():
 
 def trading_loop():
     engine = MasterXTBot()
-    test_triggered = False  # تست دستی اولیه برای بررسی صحت عملکرد ترید
     
+    # تست فوری و مستقیم در همان ثانیه اول شروع ربات
+    print("🧪 [تست فوری] در حال ارسال سفارش تست مستقیم روی بیت‌کوین...")
+    try:
+        df = engine.get_data("btc_usdt")
+        if df is not None and not df.empty:
+            curr_price = float(df.iloc[-1]['close'])
+            engine.execute_trade("btc_usdt", "تست فوری و مستقیم ربات", curr_price)
+    except Exception as e:
+        print(f"❌ خطا در تست فوری: {e}")
+
+    # ادامه روند پایش اتوماتیک بازار
     while True:
         try:
             if state['running']:
-                # باز کردن یک پوزیشن آزمایشی در اولین اجرا جهت تست نهایی
-                if not test_triggered and not active_positions:
-                    print("🧪 [تست دستی] در حال باز کردن یک پوزیشن تستی اولیه روی بیت‌کوین...")
-                    df = engine.get_data("btc_usdt")
-                    if df is not None and not df.empty:
-                        curr_price = float(df.iloc[-1]['close'])
-                        engine.execute_trade("btc_usdt", "تست دستی و اجباری اولیه ربات", curr_price)
-                        test_triggered = True
-
                 for symbol in SYMBOLS:
                     print(f"🔎 [پایش بازار] در حال بررسی {symbol}...")
                     df = engine.get_data(symbol)
@@ -335,7 +336,7 @@ def get_reply_keyboard():
 def start(message):
     bot.send_message(
         message.chat.id,
-        "🤖 MasterXTBot با استراتژی متعادل و تست اولیه آماده کار است:",
+        "🤖 MasterXTBot با تست فوری و پایش اتوماتیک آماده است:",
         reply_markup=get_reply_keyboard()
     )
 
