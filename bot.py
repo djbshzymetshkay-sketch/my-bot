@@ -5,6 +5,7 @@ import datetime
 import os
 import sys
 import atexit
+import inspect
 import requests
 import pandas as pd
 import pandas_ta as ta
@@ -27,14 +28,17 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 
-# --- دیباگ: چاپ لیست تمام متدهای واقعی آبجکت xt در شروع برنامه ---
-print("🔍 --- [ديباگ] لیست تمام متدهای موجود در آبجکت xt ---")
-for attr in dir(xt):
-    if not attr.startswith('__'):
-        print(f"🔹 {attr}")
+# --- دیباگ پیشرفته: بررسی Signature متدهای کلیدی SDK ---
+print("🔍 --- [دیباگ] بررسی ورودی‌های متدهای کلیدی SDK ---")
+for m_name in ['دریافت_سرمایه_حساب', 'تنظیم_اهرم_حساب', 'ارسال_فعال_سفارش']:
+    if hasattr(xt, m_name):
+        try:
+            sig = inspect.signature(getattr(xt, m_name))
+            print(f"📌 {m_name} ➔ Signature: {sig}")
+        except Exception as e:
+            print(f"📌 {m_name} signature check error: {e}")
 print("🔍 -------------------------------------------------")
 
-# --- سیستم هشدار خاموشی ربات ---
 def notify_shutdown(reason="نامشخص (ریست سرور یا توقف دستی)"):
     if CHAT_ID and TELEGRAM_TOKEN:
         try:
@@ -47,7 +51,7 @@ atexit.register(lambda: notify_shutdown("خاموش شدن عادی یا بست�
 
 def get_safe_balance():
     try:
-        acc = xt.get_account_capital()
+        acc = xt.دریافت_سرمایه_حساب()
         data = acc
         if isinstance(acc, tuple) and len(acc) > 1:
             data = acc[1]
@@ -127,8 +131,6 @@ class MasterXTBot:
             if df.empty:
                 return None
                 
-            print(f"🔍 [دیباگ ستون‌های DF] {symbol} columns: {list(df.columns)}")
-            
             if 'c' in df.columns:
                 df['close'] = df['c'].astype(float)
             elif 'close' in df.columns:
@@ -148,7 +150,6 @@ class MasterXTBot:
             return None, ""
         
         close = df['close']
-
         ema9 = close.ewm(span=9, adjust=False).mean()
         ema21 = close.ewm(span=21, adjust=False).mean()
 
@@ -158,7 +159,6 @@ class MasterXTBot:
         prev_ema21 = ema21.iloc[-2]
 
         cross_up = (prev_ema9 <= prev_ema21) and (curr_ema9 > curr_ema21)
-
         if cross_up:
             return "BUY", "EMA9/21 CrossUp (Optimized Fast Mode)"
         return None, ""
@@ -166,16 +166,16 @@ class MasterXTBot:
     def execute_trade(self, symbol, reason, price):
         try:
             try:
-                xt.set_account_leverage(symbol=symbol, leverage=state['leverage'])
-            except:
-                pass
+                xt.تنظیم_اهرم_حساب(symbol=symbol, leverage=state['leverage'])
+            except Exception as lev_err:
+                print(f"⚠️ هشدار تنظیم اهرم برای {symbol}: {lev_err}")
 
             balance = get_safe_balance()
             capital_in_trade = balance * state['capital_percent']
             quantity = (capital_in_trade * state['leverage']) / price
             
             try:
-                xt.send_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=quantity)
+                xt.ارسال_فعال_سفارش(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=quantity)
             except Exception as api_err:
                 if CHAT_ID:
                     bot.send_message(CHAT_ID, f"⚠️ خطای API صرافی در {symbol}: {api_err}")
@@ -203,7 +203,6 @@ class MasterXTBot:
             if CHAT_ID:
                 bot.send_message(CHAT_ID, f"❌ خطای ثبت ترید {symbol}: {e}")
 
-# --- تابع نظارت و مدیریت خودکار خروج (حد سود و حد ضرر) ---
 def manage_positions():
     engine = MasterXTBot()
     while True:
@@ -220,7 +219,7 @@ def manage_positions():
                         
                         if current_price <= sl:
                             try:
-                                xt.send_order(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
+                                xt.ارسال_فعال_سفارش(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
                                 del active_positions[symbol]
                                 save_active_positions()
                                 state['daily_stats']['pnl'] -= (entry - current_price) * quantity
@@ -232,7 +231,7 @@ def manage_positions():
                                 
                         elif current_price >= tp1:
                             try:
-                                xt.send_order(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
+                                xt.ارسال_فعال_سفارش(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
                                 del active_positions[symbol]
                                 save_active_positions()
                                 profit = (current_price - entry) * quantity
@@ -291,7 +290,7 @@ def get_reply_keyboard():
 def start(message):
     bot.send_message(
         message.chat.id, 
-        "🤖 MasterXTBot هوشمند همراه با دیباگ متدها فعال شد:", 
+        "🤖 MasterXTBot هوشمند همراه با بازرسی امن متدها فعال شد:", 
         reply_markup=get_reply_keyboard()
     )
 
@@ -348,7 +347,7 @@ def handle_text_buttons(message):
     elif text.startswith("اهرم: "):
         try:
             val = int(text.replace("اهرم: ", "").replace("x", ""))
-            state['leverage'] = val
+            state['leverage'] = val if 'val' in locals() else 50
             bot.send_message(chat_id, f"✅ اهرم روی {val}x تنظیم شد.", reply_markup=get_reply_keyboard())
         except Exception:
             bot.send_message(chat_id, "خطا در تنظیم اهرم.", reply_markup=get_reply_keyboard())
@@ -361,7 +360,6 @@ def handle_text_buttons(message):
         except Exception as e:
             bot.send_message(chat_id, f"🔴 خطا در اتصال صرافی: {e}", reply_markup=get_reply_keyboard())
 
-# راه‌اندازی تردهای موازی
 threading.Thread(target=scheduler_task, daemon=True).start()
 threading.Thread(target=trading_loop, daemon=True).start()
 threading.Thread(target=manage_positions, daemon=True).start()
