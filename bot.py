@@ -5,6 +5,7 @@ import datetime
 import os
 import sys
 import atexit
+import requests
 import pandas as pd
 import pandas_ta as ta
 import telebot
@@ -25,6 +26,13 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
+
+# --- دیباگ: چاپ لیست تمام متدهای واقعی آبجکت xt در شروع برنامه ---
+print("🔍 --- [ديباگ] لیست تمام متدهای موجود در آبجکت xt ---")
+for attr in dir(xt):
+    if not attr.startswith('__'):
+        print(f"🔹 {attr}")
+print("🔍 -------------------------------------------------")
 
 # --- سیستم هشدار خاموشی ربات ---
 def notify_shutdown(reason="نامشخص (ریست سرور یا توقف دستی)"):
@@ -103,37 +111,31 @@ state = {
 class MasterXTBot:
     def get_data(self, symbol):
         try:
-            res = xt.get_kline(symbol, interval='5m', limit=50)
-            if not res:
-                print(f"❌ داده‌ای برای {symbol} نیامد.")
-                return None
+            url = f"https://fapi.xt.com/v1/market/kline?symbol={symbol}&interval=5m&limit=50"
+            res = requests.get(url, timeout=10).json()
             
             data = res
-            if isinstance(res, tuple) and len(res) > 1:
-                data = res[1]
             if isinstance(data, dict) and 'result' in data:
                 data = data['result']
+            elif isinstance(data, dict) and 'data' in data:
+                data = data['data']
                 
-            print(f"🔍 [دیباگ خام] {symbol} type: {type(data)}")
-            if isinstance(data, list) and len(data) > 0:
-                print(f"🔍 [دیباگ نمونه آیتم اول] {symbol}: {data[0]}")
+            if not data or not isinstance(data, list):
+                return None
             
             df = pd.DataFrame(data)
             if df.empty:
-                print(f"❌ دیتافریم {symbol} خالی است.")
                 return None
                 
             print(f"🔍 [دیباگ ستون‌های DF] {symbol} columns: {list(df.columns)}")
             
-            if 'close' in df.columns:
-                df['close'] = df['close'].astype(float)
-            elif 'c' in df.columns:
+            if 'c' in df.columns:
                 df['close'] = df['c'].astype(float)
-            elif len(df.columns) >= 5 and isinstance(df.iloc[0, 4], (int, float, str)):
-                print(f"⚠️ استفاده از ایندکس ۴ به عنوان close برای {symbol}")
+            elif 'close' in df.columns:
+                df['close'] = df['close'].astype(float)
+            elif len(df.columns) >= 5:
                 df['close'] = df.iloc[:, 4].astype(float)
             else:
-                print(f"❌ ستون قیمت در {symbol} پیدا نشد! ستون‌های موجود: {list(df.columns)}")
                 return None
                 
             return df
@@ -216,7 +218,6 @@ def manage_positions():
                         tp1 = pos['tp1']
                         quantity = pos['quantity']
                         
-                        # بررسی حد ضرر (Stop Loss)
                         if current_price <= sl:
                             try:
                                 xt.send_order(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
@@ -229,7 +230,6 @@ def manage_positions():
                             except Exception as e:
                                 print(f"Error closing SL for {symbol}: {e}")
                                 
-                        # بررسی حد سود (Take Profit 1)
                         elif current_price >= tp1:
                             try:
                                 xt.send_order(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=quantity)
@@ -291,7 +291,7 @@ def get_reply_keyboard():
 def start(message):
     bot.send_message(
         message.chat.id, 
-        "🤖 MasterXTBot هوشمند فعال شد:", 
+        "🤖 MasterXTBot هوشمند همراه با دیباگ متدها فعال شد:", 
         reply_markup=get_reply_keyboard()
     )
 
