@@ -57,34 +57,42 @@ atexit.register(lambda: notify_shutdown("خاموش شدن عادی یا بست�
 
 def get_safe_balance():
     try:
-        path = "/v4/balances"  # یا endpoint صحیح والت/فیوچرز XT
-        headers = get_xt_headers(path)
+        path = "/future/user/v1/balance"
         url = f"{BASE_URL}{path}"
+        headers = get_xt_headers(path)
         res = requests.get(url, headers=headers, timeout=10)
-        data = res.json()
-        print(f"🔍 [Debug Balance Raw]: {data}")
         
-        # استخراج موجودی USDT از پاسخ استاندارد
-        result_list = data.get('result') or data.get('data') or []
-        if isinstance(result_list, list):
-            for item in result_list:
-                coin = str(item.get('coin') or item.get('currency') or '').lower()
+        print(f"🔥 [HTTP Status]: {res.status_code}")
+        print(f"🔥 [Raw Text Response]: {res.text}")
+        
+        data = res.json()
+        result_data = data.get('result') or data.get('data') or data
+        
+        if isinstance(result_data, list):
+            for item in result_data:
+                coin = str(item.get('coin') or item.get('currency') or item.get('asset') or '').lower()
+                bal = float(item.get('walletBalance') or item.get('availableBalance') or item.get('balance') or item.get('equity') or 0)
                 if coin == 'usdt' or 'usdt' in coin:
-                    bal = float(item.get('walletBalance') or item.get('availableBalance') or item.get('balance') or 0)
                     if bal > 0: return bal
-        elif isinstance(result_list, dict):
-            for k, v in result_list.items():
+            for item in result_data:
+                bal = float(item.get('walletBalance') or item.get('availableBalance') or item.get('balance') or 0)
+                if bal > 0: return bal
+        elif isinstance(result_data, dict):
+            for k, v in result_data.items():
                 if isinstance(v, dict):
-                    bal = float(v.get('walletBalance') or v.get('balance') or 0)
+                    bal = float(v.get('walletBalance') or v.get('balance') or v.get('equity') or 0)
                     if bal > 0: return bal
+            bal = float(result_data.get('walletBalance') or result_data.get('balance') or 0)
+            if bal > 0: return bal
+            
         return 0.0
     except Exception as e:
-        print(f"Error fetching balance via REST: {e}")
+        print(f"🔥 [Exception in balance]: {e}")
         return 0.0
 
 def send_xt_order(symbol, side, quantity):
     try:
-        path = "/v4/order"
+        path = "/future/trade/v1/order/create"
         body = {
             "symbol": symbol,
             "orderSide": side.upper(),
@@ -104,7 +112,7 @@ def send_xt_order(symbol, side, quantity):
 
 def set_xt_leverage(symbol, leverage):
     try:
-        path = "/v4/position/leverage"
+        path = "/future/trade/v1/position/leverage"
         body = {"symbol": symbol, "leverage": int(leverage)}
         body_str = json.dumps(body)
         headers = get_xt_headers(path, body_string=body_str)
@@ -251,7 +259,7 @@ def get_reply_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 MasterXTBot با REST API استاندارد فعال شد:", reply_markup=get_reply_keyboard())
+    bot.send_message(message.chat.id, "🤖 MasterXTBot با دیباگ مستقیم فعال شد:", reply_markup=get_reply_keyboard())
 
 @bot.message_handler(func=lambda msg: True)
 def handle_text_buttons(message):
