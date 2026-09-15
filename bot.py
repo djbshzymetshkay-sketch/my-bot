@@ -53,36 +53,52 @@ def get_safe_balance():
     try:
         acc = xt.دریافت_سرمایه_حساب()
         print(f"🔍 [Debug Balance Raw]: {repr(acc)}")
+        
         data = acc
-        if isinstance(acc, tuple) and len(acc) > 1:
-            data = acc[1]
-            
+        if isinstance(acc, tuple):
+            for item in acc:
+                if isinstance(item, (dict, list)):
+                    data = item
+                    break
+        
+        items_to_check = []
         if isinstance(data, dict):
-            res_val = data.get('result') or data.get('data') or data
-            if isinstance(res_val, list):
-                for item in res_val:
-                    if isinstance(item, dict):
-                        for k in ['walletBalance', 'availableBalance', 'balance', 'equity', 'usdt', 'amount']:
-                            if k in item and item[k] is not None:
-                                try:
-                                    val = float(item[k])
-                                    if val >= 0: return val
-                                except: pass
-            elif isinstance(res_val, dict):
-                for k in ['walletBalance', 'availableBalance', 'balance', 'equity', 'usdt']:
-                    if k in res_val and res_val[k] is not None:
-                        try: return float(res_val[k])
-                        except: pass
+            for key in ['result', 'data', 'list', 'accounts']:
+                if key in data:
+                    sub = data[key]
+                    if isinstance(sub, list): items_to_check.extend(sub)
+                    elif isinstance(sub, dict): items_to_check.append(sub)
+            items_to_check.append(data)
         elif isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict):
-                    for k in ['walletBalance', 'availableBalance', 'balance', 'equity', 'usdt']:
-                        if k in item and item[k] is not None:
-                            try:
-                                val = float(item[k])
-                                if val >= 0: return val
-                            except: pass
-                            
+            items_to_check.extend(data)
+            
+        usdt_val = None
+        fallback_val = None
+        
+        for item in items_to_check:
+            if isinstance(item, dict):
+                coin = str(item.get('coin') or item.get('currency') or item.get('asset') or '').lower()
+                bal_val = None
+                for k in ['walletBalance', 'availableBalance', 'balance', 'equity', 'usdt', 'amount']:
+                    if k in item and item[k] is not None:
+                        try:
+                            v = float(item[k])
+                            bal_val = v
+                            break
+                        except: pass
+                
+                if bal_val is not None:
+                    if 'usdt' in coin or coin == '':
+                        if usdt_val is None or bal_val > 0:
+                            usdt_val = bal_val
+                    if fallback_val is None:
+                        fallback_val = bal_val
+
+        if usdt_val is not None:
+            return float(usdt_val)
+        if fallback_val is not None:
+            return float(fallback_val)
+            
         print(f"⚠️ نتوانست موجودی را پارس کند، خروجی: {data}")
         return 0.0
     except Exception as e:
@@ -191,7 +207,7 @@ class MasterXTBot:
                 print(f"⚠️ هشدار تنظیم اهرم برای {symbol}: {lev_err}")
 
             balance = get_safe_balance()
-            capital_in_trade = balance * state['capital_percent']
+            capital_in_trade = (balance if balance > 0 else 10.0) * state['capital_percent']
             quantity = (capital_in_trade * state['leverage']) / price if price > 0 else 0
             
             try:
@@ -386,7 +402,7 @@ def handle_text_buttons(message):
     elif text == "🔄 ریست اتصال (رفع Conflict)":
         try:
             bot.remove_webhook()
-            bot.send_message(chat_id, "🔄 وب‌هوک/پویینگ ریست شد. اگر خطای ۴۰۹ داد، مطمئن شوید جای دیگری پردازش فعالی با این توکن ندارید.", reply_markup=get_reply_keyboard())
+            bot.send_message(chat_id, "🔄 وب‌هوک/پویینگ ریست شد.", reply_markup=get_reply_keyboard())
         except Exception as e:
             bot.send_message(chat_id, f"خطا در ریست: {e}", reply_markup=get_reply_keyboard())
 
