@@ -10,7 +10,6 @@ import requests
 import pandas as pd
 import telebot
 from telebot import types
-from pyxt.perp import Perp
 
 # --- پیکربندی ---
 API_KEY = os.environ.get("XT_API_KEY", "11bfe446-a063-4ee0-8871-d7ecfd612db6")
@@ -25,7 +24,6 @@ SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
            "sui_usdt", "fil_usdt", "aave_usdt", "arb_usdt", "op_usdt", "xlm_usdt", "trx_usdt", "etc_usdt", "gala_usdt"]
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 
 def notify_shutdown(reason="نامشخص"):
     if CHAT_ID and TELEGRAM_TOKEN:
@@ -35,23 +33,50 @@ def notify_shutdown(reason="نامشخص"):
 
 atexit.register(lambda: notify_shutdown("خاموش شدن اسکریپت"))
 
+def xt_request(method, endpoint, params=None):
+    """ارسال درخواست استاندارد به API صرافی XT با امضای صحیح"""
+    url = f"https://fapi.xt.com{endpoint}"
+    timestamp = str(int(time.time() * 1000))
+    
+    if method == "GET":
+        query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())]) if params else ""
+        sign_str = f"accessKey={API_KEY}&timestamp={timestamp}"
+        if query_string:
+            sign_str = f"accessKey={API_KEY}&params={query_string}&timestamp={timestamp}"
+            url += f"?{query_string}"
+        signature = hmac.new(SECRET_KEY.encode('utf-8'), sign_str.encode('utf-8'), hashlib.sha256).hexdigest()
+        
+        headers = {
+            "xt-access-key": API_KEY,
+            "xt-timestamp": timestamp,
+            "xt-signature": signature
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+    else:
+        body_str = json.dumps(params, separators=(',', ':')) if params else "{}"
+        sign_str = f"accessKey={API_KEY}&params={body_str}&timestamp={timestamp}"
+        signature = hmac.new(SECRET_KEY.encode('utf-8'), sign_str.encode('utf-8'), hashlib.sha256).hexdigest()
+        
+        headers = {
+            "Content-Type": "application/json",
+            "xt-access-key": API_KEY,
+            "xt-timestamp": timestamp,
+            "xt-signature": signature
+        }
+        response = requests.post(url, data=body_str, headers=headers, timeout=10)
+        
+    return response.json()
+
 def get_safe_balance():
     try:
-        acc = xt.get_account_capital()
-        data = acc[1] if isinstance(acc, tuple) and len(acc) > 1 else acc
-        if isinstance(data, str):
-            try: data = json.loads(data)
-            except: pass
-        if isinstance(data, dict):
-            result = data.get('result') or data.get('data') or data
-            if isinstance(result, list):
-                for item in result:
-                    if isinstance(item, dict) and str(item.get('coin') or '').lower() in ('usdt', 'usdt_perp'):
-                        bal = item.get('walletBalance') or item.get('availableBalance') or item.get('balance')
-                        if bal is not None: return float(bal)
-            elif isinstance(result, dict):
-                bal = result.get('walletBalance') or result.get('availableBalance') or result.get('balance')
-                if bal is not None: return float(bal)
+        res = xt_request("GET", "/future/user/v1/account/balance")
+        result = res.get('result') or res.get('data')
+        if isinstance(result, list):
+            for item in result:
+                if str(item.get('coin') or '').lower() in ('usdt', 'usdt_perp'):
+                    return float(item.get('walletBalance') or item.get('availableBalance') or 0)
+        elif isinstance(result, dict):
+            return float(result.get('walletBalance') or result.get('availableBalance') or 0)
         return 0.0
     except Exception as e:
         print(f"❌ خطای موجودی: {e}")
@@ -77,65 +102,18 @@ state = {
     "daily_stats": {"trades": 0, "pnl": 0.0}
 }
 
-def direct_xt_send_order(symbol, order_side, order_type, quantity, position_side):
-    """ارسال مستقیم و امن سفارش به API فیوچرز صرافی XT بدون وابستگی به باگ کتابخانه"""
-    endpoint = "/future/trade/v1/order/create"
-    url = f"https://fapi.xt.com{endpoint}"
-    
-    timestamp = str(int(time.time() * 1000))
-    
-    # فرمت صحیح پارامترها بر اساس مستندات رسمی صرافی XT
-    payload = {
-        "symbol": symbol.lower().replace("_", "-"),
-        "orderSide": order_side.upper(),      # BUY یا SELL
-        "orderType": order_type.upper(),      # MARKET یا LIMIT
-        "volume": str(quantity),              # حجم معامله
-        "positionSide": position_side.upper() # LONG یا SHORT
-    }
-    
-    body_str = json.dumps(payload, separators=(',', ':'))
-    
-    # ساخت امضای امنیتی صرافی XT
-    sign_str = f"accessKey={API_KEY}&params={body_str}&timestamp={timestamp}"
-    signature = hmac.new(SECRET_KEY.encode('utf-8'), sign_str.encode('utf-8'), hashlib.sha256).hexdigest()
-    
-    headers = {
-        "Content-Type": "application/json",
-        "xt-access-key": API_KEY,
-        "xt-timestamp": timestamp,
-        "xt-signature": signature
-    }
-    
-    response = requests.post(url, data=body_str, headers=headers, timeout=10)
-    res_json = response.json()
-    
-    if res_json.get('rc') != 0 and res_json.get('code') != 0 and res_json.get('success') is not True:
-        raise Exception(f"خطای صرافی XT: {res_json.get('msg') or res_json.get('message') or res_json}")
-        
-    return res_json
-
 class MasterXTBot:
     def get_data(self, symbol):
         try:
-            ticker_res = None
-            for s_format in [symbol, symbol.lower().replace("_", "-")]:
-                try:
-                    ticker_res = xt.get_ticker(s_format)
-                    if ticker_res: break
-                except:
-                    pass
-            
-            t_data = ticker_res[1] if isinstance(ticker_res, tuple) and len(ticker_res) > 1 else ticker_res
+            res = xt_request("GET", f"/future/market/v1/public/ticker/price", {"symbol": symbol.lower().replace("_", "-")})
+            t_data = res.get('result') or res.get('data')
+            price = 0.0
             if isinstance(t_data, dict):
-                t_data = t_data.get('result') or t_data.get('data') or t_data
-            
-            price = None
-            if isinstance(t_data, dict):
-                price = float(t_data.get('price') or t_data.get('lastPrice') or t_data.get('c') or 0)
-            elif isinstance(t_data, list) and len(t_data) > 0 and isinstance(t_data[0], dict):
+                price = float(t_data.get('price') or t_data.get('lastPrice') or 0)
+            elif isinstance(t_data, list) and len(t_data) > 0:
                 price = float(t_data[0].get('price') or t_data[0].get('lastPrice') or 0)
 
-            if price and price > 0:
+            if price > 0:
                 df_fake = pd.DataFrame({
                     'open': [price * 0.99] * 35,
                     'high': [price * 1.01] * 35,
@@ -145,15 +123,21 @@ class MasterXTBot:
                 return df_fake
             return None
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Error fetching data: {e}")
             return None
 
     def execute_trade(self, symbol, reason, price):
         try:
+            formatted_symbol = symbol.lower().replace("_", "-")
+            
+            # تنظیم اهرم
             try:
-                xt.set_account_leverage(symbol=symbol, leverage=state['leverage'])
-            except Exception as ex:
-                print(f"Leverage warning: {ex}")
+                xt_request("POST", "/future/trade/v1/leverage/adjust", {
+                    "symbol": formatted_symbol,
+                    "leverage": state['leverage'],
+                    "positionSide": "LONG"
+                })
+            except: pass
 
             balance = get_safe_balance()
             effective_balance = balance if balance > 0 else 10.0
@@ -163,18 +147,22 @@ class MasterXTBot:
             quantity = round(raw_qty, 3)
             if quantity <= 0: quantity = 0.001
 
-            print(f"🚀 ارسال مستقیم سفارش به صرافی روی {symbol} با حجم {quantity}")
+            print(f"🚀 ارسال سفارش واقعی به صرافی روی {formatted_symbol} با حجم {quantity}")
             
-            # استفاده از روش کاملاً امن و مستقیم HTTP
-            order_res = direct_xt_send_order(
-                symbol=symbol, 
-                order_side="BUY", 
-                order_type="MARKET", 
-                quantity=quantity, 
-                position_side="LONG"
-            )
-            print(f"✅ نتیجه موفق صرافی: {order_res}")
+            # ثبت پوزیشن بازار (Market Order)
+            payload = {
+                "symbol": formatted_symbol,
+                "orderSide": "BUY",
+                "orderType": "MARKET",
+                "volume": str(quantity),
+                "positionSide": "LONG"
+            }
+            order_res = xt_request("POST", "/future/trade/v1/order/create", payload)
+            
+            if order_res.get('rc') != 0 and order_res.get('code') != 0:
+                raise Exception(f"خطای صرافی: {order_res.get('msg') or order_res}")
 
+            print(f"✅ پوزیشن با موفقیت باز شد: {order_res}")
             active_positions[symbol] = {"entry": price, "quantity": quantity}
             save_active_positions()
             state['daily_stats']['trades'] += 1
@@ -256,7 +244,7 @@ def handle_text_buttons(message):
             types.KeyboardButton("اهرم: 10x"), types.KeyboardButton("اهرم: 50x"),
             types.KeyboardButton("🔙 بازگشت به منوی اصلی")
         )
-        bot.send_message(chat_id, f"⚙️ تنظیمات:\n- سرمایه: {state['capital_percent']*100}%\n- اهرم: {state['leverage']} حق", reply_markup=markup)
+        bot.send_message(chat_id, f"⚙️ تنظیمات:\n- سرمایه: {state['capital_percent']*100}%\n- اهرم: {state['leverage']}x", reply_markup=markup)
     elif text.startswith("سرمایه: "):
         try: state['capital_percent'] = int(text.replace("سرمایه: ", "").replace("%", "")) / 100.0
         except: pass
