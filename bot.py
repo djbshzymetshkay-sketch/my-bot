@@ -114,17 +114,24 @@ class MasterXTBot:
             if isinstance(data, dict) and 'result' in data:
                 data = data['result']
                 
+            print(f"🔍 [دیباگ خام] {symbol} type: {type(data)}")
+            if isinstance(data, list) and len(data) > 0:
+                print(f"🔍 [دیباگ نمونه آیتم اول] {symbol}: {data[0]}")
+            
             df = pd.DataFrame(data)
             if df.empty:
                 print(f"❌ دیتافریم {symbol} خالی است.")
                 return None
                 
-            print(f"🔍 [دیباگ] اسم ستون‌های دریافتی برای {symbol}: {list(df.columns)}")
+            print(f"🔍 [دیباگ ستون‌های DF] {symbol} columns: {list(df.columns)}")
             
             if 'close' in df.columns:
                 df['close'] = df['close'].astype(float)
             elif 'c' in df.columns:
                 df['close'] = df['c'].astype(float)
+            elif len(df.columns) >= 5 and isinstance(df.iloc[0, 4], (int, float, str)):
+                print(f"⚠️ استفاده از ایندکس ۴ به عنوان close برای {symbol}")
+                df['close'] = df.iloc[:, 4].astype(float)
             else:
                 print(f"❌ ستون قیمت در {symbol} پیدا نشد! ستون‌های موجود: {list(df.columns)}")
                 return None
@@ -284,7 +291,7 @@ def get_reply_keyboard():
 def start(message):
     bot.send_message(
         message.chat.id, 
-        "🤖 MasterXTBot همراه با ذخیره‌سازی دائمی پوزیشن‌ها فعال شد:", 
+        "🤖 MasterXTBot هوشمند فعال شد:", 
         reply_markup=get_reply_keyboard()
     )
 
@@ -354,7 +361,7 @@ def handle_text_buttons(message):
         except Exception as e:
             bot.send_message(chat_id, f"🔴 خطا در اتصال صرافی: {e}", reply_markup=get_reply_keyboard())
 
-# راه‌اندازی تردهای موازی (پایش بازار، مدیریت پوزیشن‌ها و هارت‌بیت)
+# راه‌اندازی تردهای موازی
 threading.Thread(target=scheduler_task, daemon=True).start()
 threading.Thread(target=trading_loop, daemon=True).start()
 threading.Thread(target=manage_positions, daemon=True).start()
