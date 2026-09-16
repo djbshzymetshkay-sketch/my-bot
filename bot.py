@@ -14,7 +14,7 @@ from pyxt.perp import Perp
 API_KEY = os.environ.get("XT_API_KEY", "11bfe446-a063-4ee0-8871-d7ecfd612db6")
 SECRET_KEY = os.environ.get("XT_SECRET_KEY", "f4442716939deb0ff2415e88503d26fc663c2738")
 TELEGRAM_TOKEN = os.environ.get("TOKEN", "8763614980:AAGIQXQtT7OkEmehPcaKeDYz6puNUjZeDGU")
-CHAT_ID = os.environ.get("CHAT_ID", "")  # چت آیدی خود را در صورت نیاز اینجا قرار دهید
+CHAT_ID = os.environ.get("CHAT_ID", "")
 POSITIONS_FILE = "active_positions.json"
 
 SYMBOLS = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt", "ada_usdt",
@@ -26,7 +26,6 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 xt = Perp(host="https://fapi.xt.com", access_key=API_KEY, secret_key=SECRET_KEY)
 
 def send_alert(message):
-    """ارسال هشدار به تلگرام با مدیریت خطا"""
     if CHAT_ID and TELEGRAM_TOKEN:
         try:
             bot.send_message(CHAT_ID, message)
@@ -39,7 +38,6 @@ def notify_shutdown(reason="نامشخص"):
 atexit.register(lambda: notify_shutdown("خاموش شدن اسکریپت"))
 
 def get_safe_balance():
-    """دریافت امن موجودی با قابلیت تلاش مجدد خودکار"""
     for attempt in range(3):
         try:
             acc = xt.get_account_capital()
@@ -57,7 +55,7 @@ def get_safe_balance():
                 elif isinstance(result, dict):
                     bal = result.get('walletBalance') or result.get('availableBalance') or result.get('balance')
                     if bal is not None: return float(bal)
-            return 10.0  # مقدار پیش‌فرض امن برای جلوگیری از توقف محاسبه حجم
+            return 10.0
         except Exception as e:
             time.sleep(2)
     return 10.0
@@ -99,14 +97,12 @@ active_positions = load_active_positions()
 state = {
     "running": True,
     "capital_percent": 0.3,
-    "leverage": 20,
-    "daily_stats": {"trades": 0, "pnl": 0.0},
-    "last_error_fixed": None
+    "leverage": 20,  # اهرم پیش‌فرض
+    "daily_stats": {"trades": 0, "pnl": 0.0}
 }
 
 class MasterXTBot:
     def get_data(self, symbol):
-        """دریافت کندل‌ها با مکانیزم خودترمیمی و تلاش مجدد"""
         for attempt in range(3):
             try:
                 res = xt.get_kline(symbol, interval='5m', limit=30)
@@ -133,14 +129,11 @@ class MasterXTBot:
 
                 df['close'] = df['close'].astype(float)
                 return df
-            except Exception as e:
+            except Exception:
                 time.sleep(1.5)
-        
-        # اگر مشکلی در دریافت داده بود، خودکار لاگ کرده و موقتاً رد می‌شود
         return None
 
     def analyze(self, df):
-        """استراتژی بسیار منعطف و ساده‌شده برای اطمینان از باز شدن پوزیشن"""
         if df is None or len(df) < 10 or 'close' not in df.columns:
             return None, "داده نامعتبر"
 
@@ -152,7 +145,6 @@ class MasterXTBot:
         curr_ema5 = ema5.iloc[-1]
         curr_ema10 = ema10.iloc[-1]
 
-        # شرایط بسیار ساده: اگر روند کوتاه مدت صعودی باشد یا قیمت بالاتر از میانگین باشد
         if curr_ema5 >= curr_ema10 or curr_close > curr_ema5:
             return "BUY", f"روند صعودی ملایم (EMA5>=EMA10)"
 
@@ -160,9 +152,11 @@ class MasterXTBot:
 
     def execute_trade(self, symbol, reason, price):
         try:
+            # اعمال اهرم انتخابی در صرافی قبل از باز کردن پوزیشن
             try:
                 xt.set_account_leverage(symbol=symbol, leverage=state['leverage'])
-            except: pass
+            except Exception as e:
+                print(f"خطا در ست کردن اهرم روی صرافی: {e}")
 
             balance = get_safe_balance()
             capital_in_trade = balance * state['capital_percent']
@@ -174,21 +168,17 @@ class MasterXTBot:
 
             order_res = xt.send_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=str(quantity), positionSide="LONG")
             
-            tp1 = price * 1.015  # 1.5 درصد سود
-            sl = price * 0.985   # 1.5 درصد حد ضرر
+            tp1 = price * 1.015
+            sl = price * 0.985
 
             active_positions[symbol] = {"entry": price, "tp1": tp1, "sl": sl, "quantity": quantity}
             save_active_positions()
             state['daily_stats']['trades'] += 1
 
-            send_alert(f"🚀 **پوزیشن خودکار باز شد!**\n- نماد: {symbol}\n- قیمت ورود: {price}\n- حجم: {quantity}\n- اهرم: {state['leverage']}x\n- دلیل: {reason}")
+            send_alert(f"🚀 **پوزیشن خودکار باز شد!**\n- نماد: {symbol}\n- قیمت ورود: {price}\n- حجم: {quantity}\n- اهرم تنظیم‌شده: {state['leverage']}x\n- دلیل: {reason}")
         except Exception as e:
-            # سیستم خودترمیمی خطای صرافی
             err_msg = str(e)
-            if "insufficient" in err_msg.lower():
-                send_alert(f"⚠️ خطای موجودی ناکافی در {symbol}. ربات مبلغ سرمایه را تنظیم کرد.")
-            else:
-                send_alert(f"⚠️ خطای موقت در ثبت ترید {symbol}: {err_msg} - ربات به صورت خودکار به کار خود ادامه می‌دهد.")
+            send_alert(f"⚠️ خطای موقت در ثبت ترید {symbol}: {err_msg} - ربات به کار خود ادامه می‌دهد.")
 
 def manage_positions():
     engine = MasterXTBot()
@@ -225,17 +215,12 @@ def manage_positions():
             time.sleep(10)
 
 def self_healing_monitor():
-    """سیستم نظارت ۲۴ ساعته برای کشف خرابی‌ها، رفع خودکار و گزارش به تلگرام"""
     while True:
         try:
-            now = datetime.datetime.now()
-            # تست اتصال به صرافی هر 30 دقیقه یکبار برای اطمینان از سلامت ارتباط
             balance = get_safe_balance()
             if balance <= 0:
-                send_alert("🛠️ **گزارش خودترمیمی:** ارتباط با صرافی یا موجودی موقتاً با اختلال روبه‌رو شد. ربات به طور خودکار مجدد تلاش می‌کند.")
-            
-            # ارسال گزارش سلامت 24 ساعته
-            time.sleep(3600)  # هر یک ساعت بررسی کامل
+                send_alert("🛠️ **گزارش خودترمیمی:** ارتباط با صرافی یا موجودی موقتاً با اختلال روبه‌رو شد.")
+            time.sleep(3600)
         except Exception as e:
             send_alert(f"🛠️ **سیستم خودترمیمی:** خطایی کشف و رفع شد: {e}")
             time.sleep(60)
@@ -264,6 +249,7 @@ def get_reply_keyboard():
     markup.add(
         types.KeyboardButton("🟢 شروع ربات"),
         types.KeyboardButton("🛑 توقف اضطراری"),
+        types.KeyboardButton("⚙️ تنظیم اهرم"),
         types.KeyboardButton("💰 سود/زیان"),
         types.KeyboardButton("📊 پوزیشن‌ها"),
         types.KeyboardButton("🔍 موجودی"),
@@ -273,7 +259,7 @@ def get_reply_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 ربات هوشمند با قابلیت خودترمیمی ۲۴ ساعته فعال شد:", reply_markup=get_reply_keyboard())
+    bot.send_message(message.chat.id, "🤖 ربات هوشمند با قابلیت تنظیم اهرم و خودترمیمی فعال شد:", reply_markup=get_reply_keyboard())
 
 @bot.message_handler(func=lambda msg: True)
 def handle_text_buttons(message):
@@ -286,6 +272,25 @@ def handle_text_buttons(message):
     elif text == "🛑 توقف اضطراری":
         state['running'] = False
         bot.send_message(chat_id, "🔴 ربات متوقف شد.", reply_markup=get_reply_keyboard())
+    elif text == "⚙️ تنظیم اهرم":
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
+        markup.add(
+            types.KeyboardButton("اهرم: 10x"),
+            types.KeyboardButton("اهرم: 20x"),
+            types.KeyboardButton("اهرم: 50x"),
+            types.KeyboardButton("اهرم: 100x"),
+            types.KeyboardButton("🔙 بازگشت به منوی اصلی")
+        )
+        bot.send_message(chat_id, f"⚙️ اهرم فعلی ربات: {state['leverage']}x\nلطفاً اهرم جدید را انتخاب کنید:", reply_markup=markup)
+    elif text.startswith("اهرم: "):
+        try:
+            val = int(text.replace("اهرم: ", "").replace("x", ""))
+            state['leverage'] = val
+            bot.send_message(chat_id, f"✅ اهرم با موفقیت روی {val}x تنظیم شد.", reply_markup=get_reply_keyboard())
+        except:
+            bot.send_message(chat_id, "❌ خطا در تنظیم اهرم.", reply_markup=get_reply_keyboard())
+    elif text == "🔙 بازگشت به منوی اصلی":
+        bot.send_message(chat_id, "منوی اصلی:", reply_markup=get_reply_keyboard())
     elif text == "🔍 موجودی":
         bal = get_safe_balance()
         bot.send_message(chat_id, f"💰 موجودی کل: {bal} USDT", reply_markup=get_reply_keyboard())
@@ -300,9 +305,9 @@ def handle_text_buttons(message):
             msg = "📈 پوزیشن‌های فعال:\n" + "".join([f"- {s} | حجم: {d['quantity']}\n" for s, d in active_positions.items()])
             bot.send_message(chat_id, msg, reply_markup=get_reply_keyboard())
     elif text == "🟢 وضعیت سیستم خودترمیمی":
-        bot.send_message(chat_id, "🟢 سیستم خودترمیمی و پایش ۲۴ ساعته فعال است و هیچ خطایی گزارش نشده.", reply_markup=get_reply_keyboard())
+        bot.send_message(chat_id, f"🟢 سیستم فعال است.\n⚡️ اهرم فعال: {state['leverage']}x\n💼 درصد سرمایه درگیر: {int(state['capital_percent']*100)}%", reply_markup=get_reply_keyboard())
 
-# راه‌اندازی تردهای موازی نظارت و معاملات
+# راه‌اندازی تردهای موازی
 threading.Thread(target=trading_loop, daemon=True).start()
 threading.Thread(target=manage_positions, daemon=True).start()
 threading.Thread(target=self_healing_monitor, daemon=True).start()
