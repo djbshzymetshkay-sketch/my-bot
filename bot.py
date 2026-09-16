@@ -96,8 +96,8 @@ brain = Brain()
 active_positions = load_active_positions()
 state = {
     "running": True,
-    "capital_percent": 0.3,
-    "leverage": 20,  # اهرم پیش‌فرض
+    "capital_percent": 0.3,  # پیش‌فرض 30 درصد
+    "leverage": 20,          # اهرم پیش‌فرض
     "daily_stats": {"trades": 0, "pnl": 0.0}
 }
 
@@ -152,7 +152,6 @@ class MasterXTBot:
 
     def execute_trade(self, symbol, reason, price):
         try:
-            # اعمال اهرم انتخابی در صرافی قبل از باز کردن پوزیشن
             try:
                 xt.set_account_leverage(symbol=symbol, leverage=state['leverage'])
             except Exception as e:
@@ -175,7 +174,7 @@ class MasterXTBot:
             save_active_positions()
             state['daily_stats']['trades'] += 1
 
-            send_alert(f"🚀 **پوزیشن خودکار باز شد!**\n- نماد: {symbol}\n- قیمت ورود: {price}\n- حجم: {quantity}\n- اهرم تنظیم‌شده: {state['leverage']}x\n- دلیل: {reason}")
+            send_alert(f"🚀 **پوزیشن خودکار باز شد!**\n- نماد: {symbol}\n- قیمت ورود: {price}\n- حجم: {quantity}\n- اهرم: {state['leverage']}x\n- سرمایه درگیر: {capital_in_trade:.2f} USDT\n- دلیل: {reason}")
         except Exception as e:
             err_msg = str(e)
             send_alert(f"⚠️ خطای موقت در ثبت ترید {symbol}: {err_msg} - ربات به کار خود ادامه می‌دهد.")
@@ -249,7 +248,7 @@ def get_reply_keyboard():
     markup.add(
         types.KeyboardButton("🟢 شروع ربات"),
         types.KeyboardButton("🛑 توقف اضطراری"),
-        types.KeyboardButton("⚙️ تنظیم اهرم"),
+        types.KeyboardButton("⚙️ تنظیم ریسک و سرمایه"),
         types.KeyboardButton("💰 سود/زیان"),
         types.KeyboardButton("📊 پوزیشن‌ها"),
         types.KeyboardButton("🔍 موجودی"),
@@ -259,7 +258,7 @@ def get_reply_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 ربات هوشمند با قابلیت تنظیم اهرم و خودترمیمی فعال شد:", reply_markup=get_reply_keyboard())
+    bot.send_message(message.chat.id, "🤖 ربات هوشمند با قابلیت تنظیم کامل سرمایه، اهرم و خودترمیمی فعال شد:", reply_markup=get_reply_keyboard())
 
 @bot.message_handler(func=lambda msg: True)
 def handle_text_buttons(message):
@@ -272,16 +271,30 @@ def handle_text_buttons(message):
     elif text == "🛑 توقف اضطراری":
         state['running'] = False
         bot.send_message(chat_id, "🔴 ربات متوقف شد.", reply_markup=get_reply_keyboard())
-    elif text == "⚙️ تنظیم اهرم":
+    elif text == "⚙️ تنظیم ریسک و سرمایه":
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
         markup.add(
+            types.KeyboardButton("سرمایه: 25%"),
+            types.KeyboardButton("سرمایه: 50%"),
+            types.KeyboardButton("سرمایه: 100%"),
             types.KeyboardButton("اهرم: 10x"),
             types.KeyboardButton("اهرم: 20x"),
             types.KeyboardButton("اهرم: 50x"),
             types.KeyboardButton("اهرم: 100x"),
             types.KeyboardButton("🔙 بازگشت به منوی اصلی")
         )
-        bot.send_message(chat_id, f"⚙️ اهرم فعلی ربات: {state['leverage']}x\nلطفاً اهرم جدید را انتخاب کنید:", reply_markup=markup)
+        bot.send_message(
+            chat_id, 
+            f"⚙️ تنظیمات فعلی:\n- درصد سرمایه درگیر: {int(state['capital_percent']*100)}%\n- اهرم: {state['leverage']}x\n\nلطفاً گزینه مورد نظر را انتخاب کنید:", 
+            reply_markup=markup
+        )
+    elif text.startswith("سرمایه: "):
+        try:
+            val = int(text.replace("سرمایه: ", "").replace("%", ""))
+            state['capital_percent'] = val / 100.0
+            bot.send_message(chat_id, f"✅ درصد سرمایه با موفقیت روی {val}% تنظیم شد.", reply_markup=get_reply_keyboard())
+        except:
+            bot.send_message(chat_id, "❌ خطا در تنظیم سرمایه.", reply_markup=get_reply_keyboard())
     elif text.startswith("اهرم: "):
         try:
             val = int(text.replace("اهرم: ", "").replace("x", ""))
@@ -305,7 +318,7 @@ def handle_text_buttons(message):
             msg = "📈 پوزیشن‌های فعال:\n" + "".join([f"- {s} | حجم: {d['quantity']}\n" for s, d in active_positions.items()])
             bot.send_message(chat_id, msg, reply_markup=get_reply_keyboard())
     elif text == "🟢 وضعیت سیستم خودترمیمی":
-        bot.send_message(chat_id, f"🟢 سیستم فعال است.\n⚡️ اهرم فعال: {state['leverage']}x\n💼 درصد سرمایه درگیر: {int(state['capital_percent']*100)}%", reply_markup=get_reply_keyboard())
+        bot.send_message(chat_id, f"🟢 سیستم خودترمیمی برقرار است.\n💼 درصد سرمایه: {int(state['capital_percent']*100)}%\n⚡️ اهرم: {state['leverage']}x", reply_markup=get_reply_keyboard())
 
 # راه‌اندازی تردهای موازی
 threading.Thread(target=trading_loop, daemon=True).start()
