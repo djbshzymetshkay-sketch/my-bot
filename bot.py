@@ -11,10 +11,10 @@ from telebot import types
 from pyxt.perp import Perp
 
 # --- پیکربندی ---
-API_KEY_VAL = os.environ.get("XT_API_KEY", "11bfe446-a063-4ee0-8871-d7ecfd612db6")
-SECRET_KEY_VAL = os.environ.get("XT_SECRET_KEY", "f4442716939deb0ff2415e88503d26fc663c2738")
-TOKEN_VAL = os.environ.get("TOKEN", "8763614980:AAGIQXQtT7OkEmehPcaKeDYz6puNUjZeDGU")
-CHAT_ID_VAL = os.environ.get("CHAT_ID", "")
+apikeyval = os.environ.get("XT_API_KEY", "11bfe446-a063-4ee0-8871-d7ecfd612db6")
+secretkeyval = os.environ.get("XT_SECRET_KEY", "f4442716939deb0ff2415e88503d26fc663c2738")
+tokenval = os.environ.get("TOKEN", "8763614980:AAGIQXQtT7OkEmehPcaKeDYz6puNUjZeDGU")
+chatidval = os.environ.get("CHAT_ID", "")
 positionsfile = "active_positions.json"
 
 symbols = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt", "ada_usdt",
@@ -22,15 +22,15 @@ symbols = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usd
            "pepe_usdt", "shib_usdt", "apt_usdt", "ton_usdt", "fet_usdt", "render_usdt", "injective_usdt",
            "sui_usdt", "fil_usdt", "aave_usdt", "arb_usdt", "op_usdt", "xlm_usdt", "trx_usdt", "etc_usdt", "gala_usdt"]
 
-bot = telebot.TeleBot(TOKEN_VAL)
-xt = Perp(host="https://fapi.xt.com", access_key=API_KEY_VAL, secret_key=SECRET_KEY_VAL)
+bot = telebot.TeleBot(tokenval)
+xt = Perp(host="https://fapi.xt.com", access_key=apikeyval, secret_key=secretkeyval)
 
 datalock = threading.Lock()
 
 def send_alert(message):
-    if CHAT_ID_VAL and TOKEN_VAL:
+    if chatidval and tokenval:
         try:
-            bot.send_message(CHAT_ID_VAL, message)
+            bot.send_message(chatidval, message)
         except Exception as e:
             print(f"❌ خطا در ارسال پیام به تلگرام: {e}")
 
@@ -118,7 +118,7 @@ class MasterXTBot:
     def get_data(self, symbol):
         for attempt in range(3):
             try:
-                res = xt.get_kline(symbol, interval='5m', limit=15)
+                res = xt.get_kline(symbol, interval='5m', limit=10)
                 if not res:
                     time.sleep(1)
                     continue
@@ -127,6 +127,9 @@ class MasterXTBot:
                 if isinstance(data, dict):
                     data = data.get('result') or data.get('data') or data
 
+                if not data:
+                    return None
+
                 df = pd.DataFrame(data)
                 if df.empty:
                     return None
@@ -134,31 +137,47 @@ class MasterXTBot:
                 if not isinstance(data, pd.DataFrame) and len(df.columns) == 1 and isinstance(df.iloc[0, 0], (list, tuple)):
                     df = pd.DataFrame(df.iloc[:, 0].tolist(), columns=['time', 'open', 'high', 'low', 'close', 'volume'])
 
-                df.rename(columns={'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close',
-                                   'v': 'volume', 'Close': 'close', 'C': 'close'}, inplace=True)
+                # اصلاح نام ستون‌ها بر اساس خروجی‌های مختلف صرافی
+                col_mapping = {'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume',
+                               'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}
+                df.rename(columns=col_mapping, inplace=True)
 
                 if 'close' not in df.columns or 'open' not in df.columns:
+                    # اگر نام ستون‌ها استاندارد نبود، ازایندکس استفاده کن
+                    if len(df.columns) >= 5:
+                        df = df.iloc[:, [0, 1, 2, 3, 4]]
+                        df.columns = ['time', 'open', 'high', 'low', 'close']
+                    else:
+                        return None
+
+                df['close'] = pd.to_numeric(df['close'], errors='coerce')
+                df['open'] = pd.to_numeric(df['open'], errors='coerce')
+                df.dropna(subset=['close', 'open'], inplace=True)
+
+                if df.empty:
                     return None
 
-                df['close'] = df['close'].astype(float)
-                df['open'] = df['open'].astype(float)
                 return df
             except Exception as e:
-                time.sleep(1.5)
+                print(f"خطا در دریافت کندل {symbol}: {e}")
+                time.sleep(1)
         return None
 
     def analyze(self, df, symbol):
-        if df is None or len(df) < 5 or 'close' not in df.columns:
+        if df is None or len(df) < 2:
+            print(f"[{symbol}] داده کافی نیست یا کایین خالی است.")
             return None, "داده ناقص است"
 
-        curr_close = df['close'].iloc[-1]
-        prev_close = df['close'].iloc[-2]
-        curr_open = df['open'].iloc[-1]
+        curr_close = float(df['close'].iloc[-1])
+        curr_open = float(df['open'].iloc[-1])
+        
+        print(f"[{symbol}] بررسی قیمت -> باز شدن: {curr_open}, بسته شدن: {curr_close}")
 
-        if curr_close > curr_open and curr_close >= prev_close:
-            return "BUY", f"تشخیص مومنتوم مثبت هوش مصنوعی (قیمت: {curr_close})"
+        # شرط فوق‌العاده ساده برای تست قطعی: هر زمان کندل صعودی بود یا قیمت بسته شدن بالاتر بود
+        if curr_close >= curr_open:
+            return "BUY", f"ورود تستی موفق (قیمت: {curr_close})"
 
-        return None, "بازار در حال نوسان یا استراحت است"
+        return None, "کندل نزولی است"
 
     def execute_trade(self, symbol, reason, price):
         try:
@@ -172,7 +191,7 @@ class MasterXTBot:
                     lev = state['leverage']
                 xt.set_account_leverage(symbol=symbol, leverage=lev)
             except Exception as e:
-                print(f"خطا در اهرم: {e}")
+                print(f"خطا در اهرم {symbol}: {e}")
 
             with datalock:
                 cap_percent = state['capital_percent']
@@ -185,6 +204,7 @@ class MasterXTBot:
             if quantity <= 0:
                 quantity = 0.001
 
+            print(f"ارسال سفارش خرید برای {symbol} با حجم {quantity}...")
             xt.send_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=str(quantity), positionSide="LONG")
             
             tp1 = price * 1.012
@@ -197,7 +217,8 @@ class MasterXTBot:
             save_active_positions()
             send_alert(f"🚀 **پوزیشن هوشمند باز شد!**\n- نماد: {symbol}\n- قیمت ورود: {price}\n- حجم: {quantity}\n- اهرم: {lev}x\n- دلیل: {reason}")
         except Exception as e:
-            send_alert(f"⚠️ خطای صرافی در {symbol}: {e}")
+            print(f"خطا در اجرای معامله {symbol}: {e}")
+            send_alert(f"⚠️ خطای صرافی در اجرای معامله {symbol}: {e}")
 
 def manage_positions():
     engine = MasterXTBot()
@@ -249,7 +270,6 @@ def self_healing_monitor():
             with datalock:
                 active_count = len(active_positions)
                 lev = state['leverage']
-                cap_pct = int(state['capital_percent']*100)
             
             report_msg = (
                 f"🟢 **گزارش هوش مصنوعی ربات**\n"
@@ -264,14 +284,14 @@ def self_healing_monitor():
 
 def trading_loop():
     engine = MasterXTBot()
-    no_signal_counter = 0
+    nosignalcounter = 0
     while True:
         try:
             with datalock:
                 is_running = state['running']
 
             if is_running:
-                found_signal = False
+                foundsignal = False
                 for symbol in symbols:
                     with datalock:
                         in_positions = symbol in active_positions
@@ -281,17 +301,17 @@ def trading_loop():
                         if df is not None:
                             sig, reason = engine.analyze(df, symbol)
                             if sig == "BUY":
-                                found_signal = True
-                                no_signal_counter = 0
+                                foundsignal = True
+                                nosignalcounter = 0
                                 engine.execute_trade(symbol, reason, df.iloc[-1]['close'])
-                        time.sleep(1)
+                                break # یک پوزیشن باز کند تا وضعیت بررسی شود
+                        time.sleep(0.5)
                 
-                if not found_signal:
-                    no_signal_counter += 1
-                    # اگر ۳۰ دور کامل بررسی شد و هیچ سیگنالی پیدا نشد، به کاربر خبر بده
-                    if no_signal_counter >= 30:
-                        send_alert("⏳ **گزارش وضعیت بازار:**\nبازار روند صعودی و پرقدرتی ندارد؛ فعلاً در حال رصد هستیم و صبوری می‌کنیم تا موقعیت مناسب ایجاد شود.")
-                        no_signal_counter = 0
+                if not foundsignal:
+                    nosignalcounter += 1
+                    if nosignalcounter >= 15:
+                        send_alert("⏳ **گزارش وضعیت بازار:**\nدر حال بررسی نمادها هستیم؛ به زودی موقعیت مناسب صید می‌شود.")
+                        nosignalcounter = 0
             
             time.sleep(5)
         except Exception as e:
@@ -313,7 +333,7 @@ def get_reply_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 ربات با سیستم هوش مصنوعی پویا فعال شد:", reply_markup=get_reply_keyboard())
+    bot.send_message(message.chat.id, "🤖 ربات با سیستم لاگینگ و تحلیل زنده فعال شد:", reply_markup=get_reply_keyboard())
 
 @bot.message_handler(func=lambda msg: True)
 def handle_text_buttons(message):
@@ -323,7 +343,7 @@ def handle_text_buttons(message):
     if text == "🟢 شروع ربات":
         with datalock:
             state['running'] = True
-        bot.send_message(chat_id, "🟢 ربات با الگوریتم جدید روشن شد.", reply_markup=get_reply_keyboard())
+        bot.send_message(chat_id, "🟢 ربات با موفقیت روشن شد.", reply_markup=get_reply_keyboard())
     elif text == "🛑 توقف اضطراری":
         with datalock:
             state['running'] = False
@@ -380,7 +400,7 @@ def handle_text_buttons(message):
             msg = "📈 پوزیشن‌های فعال:\n" + "".join([f"- {s} | حجم: {d['quantity']}\n" for s, d in positions_snapshot.items()])
             bot.send_message(chat_id, msg, reply_markup=get_reply_keyboard())
     elif text == "🟢 وضعیت سیستم هوشمند":
-        bot.send_message(chat_id, "🟢 سیستم تحلیلگر پویا و هوشمند فعال است.", reply_markup=get_reply_keyboard())
+        bot.send_message(chat_id, "🟢 سیستم تحلیلگر با لاگ‌برداری فعال است.", reply_markup=get_reply_keyboard())
 
 # راه‌اندازی تردهای موازی
 threading.Thread(target=trading_loop, daemon=True).start()
@@ -390,7 +410,7 @@ threading.Thread(target=self_healing_monitor, daemon=True).start()
 if __name__ == "__main__":
     while True:
         try:
-            print("🤖 ربات با سیستم هوشمند پویا شروع به کار کرد...")
+            print("🤖 ربات با سیستم لاگینگ زنده شروع به کار کرد...")
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
         except Exception as e:
             print(f"⚠️ خطای پولینگ تلگرام: {e}")
