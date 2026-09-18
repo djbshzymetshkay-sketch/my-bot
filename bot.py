@@ -118,7 +118,6 @@ state = {
 class MasterXTBot:
     def get_data(self, symbol):
         try:
-            # دریافت مستقیم اطلاعات بازار از API رسمی XT بدون وابستگی به متدهای ناقص کتابخانه
             url = "https://fapi.xt.com/future/market/v1/public/q/agg-tickers"
             response = requests.get(url, timeout=5)
             data = response.json()
@@ -174,7 +173,8 @@ class MasterXTBot:
                 quantity = 0.001
 
             print(f"ارسال سفارش خرید برای {symbol} با حجم {quantity}...")
-            xt.send_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=str(quantity), positionSide="LONG")
+            # اصلاح نام پارامترها به snake_case
+            xt.send_order(symbol=symbol, order_side="BUY", order_type="MARKET", quantity=str(quantity), position_side="LONG")
             
             tp1 = price * 1.012
             sl = price * 0.990
@@ -208,7 +208,7 @@ def manage_positions():
 
                         if current_price <= sl or current_price >= tp1:
                             try:
-                                xt.send_order(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=str(quantity), positionSide="LONG")
+                                xt.send_order(symbol=symbol, order_side="SELL", order_type="MARKET", quantity=str(quantity), position_side="LONG")
                                 profit = (current_price - entry) * quantity
                                 
                                 with datalock:
@@ -302,7 +302,7 @@ def get_reply_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 ربات با سیستم ارتباط مستقیم فعال شد:", reply_markup=get_reply_keyboard())
+    bot.send_message(message.chat.id, "🤖 ربات با سیستم اصلاح‌شده آماده به کار است:", reply_markup=get_reply_keyboard())
 
 @bot.message_handler(func=lambda msg: True)
 def handle_text_buttons(message):
@@ -369,7 +369,7 @@ def handle_text_buttons(message):
             msg = "📈 پوزیشن‌های فعال:\n" + "".join([f"- {s} | حجم: {d['quantity']}\n" for s, d in positions_snapshot.items()])
             bot.send_message(chat_id, msg, reply_markup=get_reply_keyboard())
     elif text == "🟢 وضعیت سیستم هوشمند":
-        bot.send_message(chat_id, "🟢 سیستم تحلیلگر با ارتباط مستقیم فعال است.", reply_markup=get_reply_keyboard())
+        bot.send_message(chat_id, "🟢 سیستم تحلیلگر فعال است.", reply_markup=get_reply_keyboard())
 
 # راه‌اندازی تردهای موازی
 threading.Thread(target=trading_loop, daemon=True).start()
@@ -379,7 +379,7 @@ threading.Thread(target=self_healing_monitor, daemon=True).start()
 if __name__ == "__main__":
     while True:
         try:
-            print("🤖 ربات با سیستم ارتباط مستقیم شروع به کار کرد...")
+            print("🤖 ربات با موفقیت و بدون خطای دستوری شروع به کار کرد...")
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
         except Exception as e:
             print(f"⚠️ خطای پولینگ تلگرام: {e}")
