@@ -154,16 +154,15 @@ class MasterXTBot:
                 send_alert(f"⚠️ موجودی کافی نیست: {balance} USDT")
                 return
 
-            try:
-                with datalock:
-                    lev = state['leverage']
-                xt.set_account_leverage(symbol=symbol, leverage=lev)
-            except Exception as e:
-                print(f"خطا در اهرم {symbol}: {e}")
-
             with datalock:
                 cap_percent = state['capital_percent']
                 lev = state['leverage']
+
+            # تنظیم اهرم با ارسال position_side برای جلوگیری از ارور
+            try:
+                xt.set_account_leverage(symbol=symbol, leverage=lev, position_side="LONG")
+            except Exception as e:
+                print(f"خطا در تنظیم اهرم {symbol}: {e}")
 
             capital_in_trade = balance * cap_percent
             raw_qty = (capital_in_trade * lev) / price if price > 0 else 0
@@ -173,8 +172,8 @@ class MasterXTBot:
                 quantity = 0.001
 
             print(f"ارسال سفارش خرید برای {symbol} با حجم {quantity}...")
-            # اصلاح نام پارامترها به snake_case
-            xt.send_order(symbol=symbol, order_side="BUY", order_type="MARKET", quantity=str(quantity), position_side="LONG")
+            # استفاده از ساختار صحیح و موقعیت‌دهی پوزیشن
+            xt.send_order(symbol=symbol, order_side="BUY", order_type="MARKET", qty=str(quantity), position_side="LONG")
             
             tp1 = price * 1.012
             sl = price * 0.990
@@ -208,7 +207,7 @@ def manage_positions():
 
                         if current_price <= sl or current_price >= tp1:
                             try:
-                                xt.send_order(symbol=symbol, order_side="SELL", order_type="MARKET", quantity=str(quantity), position_side="LONG")
+                                xt.send_order(symbol=symbol, order_side="SELL", order_type="MARKET", qty=str(quantity), position_side="LONG")
                                 profit = (current_price - entry) * quantity
                                 
                                 with datalock:
@@ -302,7 +301,7 @@ def get_reply_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 ربات با سیستم اصلاح‌شده آماده به کار است:", reply_markup=get_reply_keyboard())
+    bot.send_message(message.chat.id, "🤖 ربات کاملاً اصلاح شد و آماده به کار است:", reply_markup=get_reply_keyboard())
 
 @bot.message_handler(func=lambda msg: True)
 def handle_text_buttons(message):
@@ -380,7 +379,7 @@ if __name__ == "__main__":
     while True:
         try:
             print("🤖 ربات با موفقیت و بدون خطای دستوری شروع به کار کرد...")
-            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+            bot.infinity_polling(timeout=60, long_polling_timeout=60, remove_webhook=True)
         except Exception as e:
             print(f"⚠️ خطای پولینگ تلگرام: {e}")
             time.sleep(5)
