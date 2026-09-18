@@ -118,7 +118,8 @@ class MasterXTBot:
     def get_data(self, symbol):
         for attempt in range(3):
             try:
-                res = xt.get_kline(symbol, interval='5m', limit=10)
+                # اصلاح نام متد به get_klines
+                res = xt.get_klines(symbol, interval='5m', limit=10)
                 if not res:
                     time.sleep(1)
                     continue
@@ -137,13 +138,11 @@ class MasterXTBot:
                 if not isinstance(data, pd.DataFrame) and len(df.columns) == 1 and isinstance(df.iloc[0, 0], (list, tuple)):
                     df = pd.DataFrame(df.iloc[:, 0].tolist(), columns=['time', 'open', 'high', 'low', 'close', 'volume'])
 
-                # اصلاح نام ستون‌ها بر اساس خروجی‌های مختلف صرافی
                 col_mapping = {'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume',
                                'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}
                 df.rename(columns=col_mapping, inplace=True)
 
                 if 'close' not in df.columns or 'open' not in df.columns:
-                    # اگر نام ستون‌ها استاندارد نبود، ازایندکس استفاده کن
                     if len(df.columns) >= 5:
                         df = df.iloc[:, [0, 1, 2, 3, 4]]
                         df.columns = ['time', 'open', 'high', 'low', 'close']
@@ -165,7 +164,6 @@ class MasterXTBot:
 
     def analyze(self, df, symbol):
         if df is None or len(df) < 2:
-            print(f"[{symbol}] داده کافی نیست یا کایین خالی است.")
             return None, "داده ناقص است"
 
         curr_close = float(df['close'].iloc[-1])
@@ -173,7 +171,6 @@ class MasterXTBot:
         
         print(f"[{symbol}] بررسی قیمت -> باز شدن: {curr_open}, بسته شدن: {curr_close}")
 
-        # شرط فوق‌العاده ساده برای تست قطعی: هر زمان کندل صعودی بود یا قیمت بسته شدن بالاتر بود
         if curr_close >= curr_open:
             return "BUY", f"ورود تستی موفق (قیمت: {curr_close})"
 
@@ -304,7 +301,7 @@ def trading_loop():
                                 foundsignal = True
                                 nosignalcounter = 0
                                 engine.execute_trade(symbol, reason, df.iloc[-1]['close'])
-                                break # یک پوزیشن باز کند تا وضعیت بررسی شود
+                                break
                         time.sleep(0.5)
                 
                 if not foundsignal:
