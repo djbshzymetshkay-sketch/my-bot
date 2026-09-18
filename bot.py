@@ -31,9 +31,12 @@ datalock = threading.Lock()
 def send_alert(message):
     if chatidval and tokenval:
         try:
-            bot.send_message(chatidval, message)
-        except Exception as e:
-            print(f"❌ خطا در ارسال پیام به تلگرام: {e}")
+            bot.send_message(chatidval, message, parse_mode="Markdown")
+        except Exception:
+            try:
+                bot.send_message(chatidval, message)
+            except:
+                pass
 
 def get_safe_balance():
     try:
@@ -52,8 +55,7 @@ def get_safe_balance():
                 bal = result.get('walletBalance') or result.get('availableBalance') or result.get('balance')
                 if bal is not None: return float(bal)
         return 0.0
-    except Exception as e:
-        print(f"🔴 خطای دقیق در دریافت موجودی: {e}")
+    except Exception:
         return 0.0
 
 def safe_save_json(filepath, data):
@@ -62,8 +64,7 @@ def safe_save_json(filepath, data):
         with open(temp_file, 'w') as f:
             json.dump(data, f, indent=4)
         os.replace(temp_file, filepath)
-    except Exception as e:
-        print(f"⚠️ خطا در ذخیره فایل {filepath}: {e}")
+    except Exception:
         if os.path.exists(temp_file):
             try: os.remove(temp_file)
             except: pass
@@ -122,8 +123,7 @@ class MasterXTBot:
                     df = pd.DataFrame({'open': [curr_open], 'close': [curr_close]})
                     return df
             return None
-        except Exception as e:
-            print(f"⚠️ خطا در دریافت اطلاعات بازار {symbol}: {e}")
+        except Exception:
             return None
 
     def analyze(self, df, symbol):
@@ -132,27 +132,31 @@ class MasterXTBot:
 
         curr_close = float(df['close'].iloc[-1])
         curr_open = float(df['open'].iloc[-1])
+        percent_change = ((curr_close - curr_open) / curr_open) * 100
 
-        if curr_close >= curr_open:
-            return "BUY", f"ورود موفق (قیمت: {curr_close})"
+        # شرط سخت‌گیرانه برای سیگنال معتبر
+        if percent_change >= 0.15:
+            return "BUY", f"صعودی قوی (+{percent_change:.2f}%)"
+        elif percent_change <= -0.15:
+            return "SELL", f"نزولی قوی ({percent_change:.2f}%)"
 
-        return None, "کندل نزولی است"
+        return None, "روند خنثی"
 
-    def execute_trade(self, symbol, reason, price):
+    def execute_trade(self, symbol, signal_type, reason, price):
         try:
             balance = get_safe_balance()
             if balance < 0.5:
-                return
+                return False
 
             with datalock:
                 cap_percent = state['capital_percent']
                 lev = state['leverage']
 
-            # اصلاح ارسال position_side برای اهرم
             try:
-                xt.set_account_leverage(symbol=symbol, leverage=lev, position_side="LONG")
-            except Exception as e:
-                print(f"🔴 خطای دقیق تنظیم اهرم برای {symbol}: {e}")
+                if hasattr(xt, 'set_account_leverage'):
+                    xt.set_account_leverage(symbol=symbol, leverage=lev)
+            except Exception:
+                pass
 
             capital_in_trade = balance * cap_percent
             raw_qty = (capital_in_trade * lev) / price if price > 0 else 0
@@ -160,23 +164,69 @@ class MasterXTBot:
             if quantity <= 0:
                 quantity = 0.001
 
-            # استفاده از پارامترهای استاندارد کتابخانه pyxt
-            try:
-                xt.send_order(symbol=symbol, order_side="BUY", order_type="MARKET", qty=str(quantity), position_side="LONG")
-            except Exception as e:
-                print(f"🔴 خطای دقیق ارسال سفارش خرید ({symbol}): {e}")
-            
-            tp1 = price * 1.012
-            sl = price * 0.990
+            position_side = "LONG" if signal_type == "BUY" else "SHORT"
+            order_side = "BUY" if signal_type == "BUY" else "SELL"
+
+            order_sent = False
+            for kwargs in [
+                {"symbol": symbol, "order_side": order_side, "order_type": "MARKET", "quantity": str(quantity), "position_side": position_side},
+                {"symbol": symbol, "orderSide": order_side, "orderType": "MARKET", "quantity": str(quantity), "positionSide": position_side},
+                {"symbol": symbol, "side": order_side, "type": "MARKET", "amount": str(quantity)}
+            ]:
+                try:
+                    res = xt.send_order(**kwargs)
+                    if res:
+                        order_sent = True
+                        break
+                except Exception:
+                    continue
+
+            if not order_sent:
+                return False
+
+            if signal_type == "BUY":
+                tp1 = price * 1.010
+                tp2 = price * 1.020
+                tp3 = price * 1.030
+                sl = price * 0.985
+            else:
+                tp1 = price * 0.990
+                tp2 = price * 0.980
+                tp3 = price * 0.970
+                sl = price * 1.015
 
             with datalock:
-                active_positions[symbol] = {"entry": price, "tp1": tp1, "sl": sl, "quantity": quantity}
+                active_positions[symbol] = {
+                    "entry": price, 
+                    "tp1": tp1, 
+                    "sl": sl, 
+                    "quantity": quantity, 
+                    "type": signal_type
+                }
                 state['daily_stats']['trades'] += 1
             
             save_active_positions()
-            send_alert(f"🚀 **پوزیشن باز شد!**\n- نماد: {symbol}\n- قیمت: {price}")
-        except Exception as e:
-            print(f"🔴 خطای کلی در اجرای معامله {symbol}: {e}")
+
+            # قالب پیام حرفه‌ای دقیقا مشابه نمونه درخواستی شما
+            sym_clean = symbol.upper().replace('_', '/')
+            side_text = "LONG 🟢" if signal_type == "BUY" else "SHORT 🔴"
+            
+            msg = (
+                f"#{sym_clean}\n"
+                f"{side_text}\n\n"
+                f"📍 ENTRY : NOW ( market ) {price}\n\n"
+                f"🛑 SL : {sl}\n"
+                f"✅ TP :\n"
+                f"  1️⃣ {tp1}\n"
+                f"  2️⃣ {tp2}\n"
+                f"  3️⃣ {tp3}\n\n"
+                f"⚡ LEVERAGE : {lev}X\n"
+                f"💬 دلیل: {reason}"
+            )
+            send_alert(msg)
+            return True
+        except Exception:
+            return False
 
 def manage_positions():
     engine = MasterXTBot()
@@ -194,18 +244,40 @@ def manage_positions():
                         sl = pos['sl']
                         tp1 = pos['tp1']
                         quantity = pos['quantity']
+                        pos_type = pos.get('type', 'BUY')
 
-                        if current_price <= sl or current_price >= tp1:
-                            try:
-                                xt.send_order(symbol=symbol, order_side="SELL", order_type="MARKET", qty=str(quantity), position_side="LONG")
-                            except Exception as e:
-                                print(f"🔴 خطای دقیق بستن سفارش فروش ({symbol}): {e}")
+                        hit_exit = False
+                        if pos_type == 'BUY':
+                            if current_price <= sl or current_price >= tp1:
+                                hit_exit = True
+                        else: # SHORT
+                            if current_price >= sl or current_price <= tp1:
+                                hit_exit = True
 
-                            profit = (current_price - entry) * quantity
+                        if hit_exit:
+                            close_side = "SELL" if pos_type == 'BUY' else "BUY"
+                            close_pos_side = "LONG" if pos_type == 'BUY' else "SHORT"
+                            
+                            for kwargs in [
+                                {"symbol": symbol, "order_side": close_side, "order_type": "MARKET", "quantity": str(quantity), "position_side": close_pos_side},
+                                {"symbol": symbol, "orderSide": close_side, "orderType": "MARKET", "quantity": str(quantity), "position_side": close_pos_side},
+                                {"symbol": symbol, "side": close_side, "type": "MARKET", "amount": str(quantity)}
+                            ]:
+                                try:
+                                    xt.send_order(**kwargs)
+                                    break
+                                except Exception:
+                                    continue
+
+                            if pos_type == 'BUY':
+                                profit = (current_price - entry) * quantity
+                            else:
+                                profit = (entry - current_price) * quantity
+
                             with datalock:
                                 state['daily_stats']['pnl'] += profit
                             
-                            success = current_price >= tp1
+                            success = profit > 0
                             brain.learn(success)
                             
                             with datalock:
@@ -213,10 +285,19 @@ def manage_positions():
                                     del active_positions[symbol]
                             
                             save_active_positions()
-                            send_alert(f"🎯 بسته شد - نماد: {symbol} | سود/زیان: {profit:.2f} USDT")
+
+                            sym_clean = symbol.upper().replace('_', '/')
+                            status_emoji = "🟢 سود" if profit >= 0 else "🔴 زیان"
+                            close_msg = (
+                                f"🎯 **پوزیشن بسته شد**\n"
+                                f"📌 نماد: #{sym_clean}\n"
+                                f"📊 وضعیت: {status_emoji}\n"
+                                f"💰 سود/زیان: `{profit:.2f} USDT`\n"
+                                f"🏁 قیمت خروج: {current_price}"
+                            )
+                            send_alert(close_msg)
             time.sleep(5)
-        except Exception as e:
-            print(f"⚠️ خطای حلقه مدیریت پوزیشن‌ها: {e}")
+        except Exception:
             time.sleep(10)
 
 def trading_loop():
@@ -235,13 +316,13 @@ def trading_loop():
                         df = engine.get_data(symbol)
                         if df is not None:
                             sig, reason = engine.analyze(df, symbol)
-                            if sig == "BUY":
-                                engine.execute_trade(symbol, reason, df.iloc[-1]['close'])
-                                break
+                            if sig in ["BUY", "SELL"]:
+                                opened = engine.execute_trade(symbol, sig, reason, df.iloc[-1]['close'])
+                                if opened:
+                                    break
                         time.sleep(0.5)
             time.sleep(5)
-        except Exception as e:
-            print(f"⚠️ خطای حلقه معاملاتی: {e}")
+        except Exception:
             time.sleep(10)
 
 def get_reply_keyboard():
@@ -259,7 +340,7 @@ def get_reply_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 ربات آماده به کار است:", reply_markup=get_reply_keyboard())
+    bot.send_message(message.chat.id, "🤖 ربات حرفه‌ای آماده است:", reply_markup=get_reply_keyboard())
 
 @bot.message_handler(func=lambda msg: True)
 def handle_text_buttons(message):
@@ -322,10 +403,10 @@ def handle_text_buttons(message):
         if not positions_snapshot:
             bot.send_message(chat_id, "📭 پوزیشنی فعال نیست.", reply_markup=get_reply_keyboard())
         else:
-            msg = "📈 پوزیشن‌ها:\n" + "".join([f"- {s}\n" for s in positions_snapshot.keys()])
+            msg = "📈 پوزیشن‌ها:\n" + "".join([f"- {s} ({p.get('type')})\n" for s, p in positions_snapshot.items()])
             bot.send_message(chat_id, msg, reply_markup=get_reply_keyboard())
     elif text == "🟢 وضعیت سیستم هوشمند":
-        bot.send_message(chat_id, "🟢 سیستم فعال است.", reply_markup=get_reply_keyboard())
+        bot.send_message(chat_id, "🟢 سیستم فعال و آماده به کار است.", reply_markup=get_reply_keyboard())
 
 # راه‌اندازی تردهای موازی
 threading.Thread(target=trading_loop, daemon=True).start()
@@ -335,6 +416,5 @@ if __name__ == "__main__":
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            print(f"⚠️ خطای پولینگ تلگرام: {e}")
+        except Exception:
             time.sleep(5)
