@@ -148,9 +148,9 @@ class MasterXTBot:
                 cap_percent = state['capital_percent']
                 lev = state['leverage']
 
-            # چاپ دقیق ارور تنظیم اهرم در لاگ
+            # اصلاح ارسال position_side برای اهرم
             try:
-                xt.set_account_leverage(symbol=symbol, leverage=lev)
+                xt.set_account_leverage(symbol=symbol, leverage=lev, position_side="LONG")
             except Exception as e:
                 print(f"🔴 خطای دقیق تنظیم اهرم برای {symbol}: {e}")
 
@@ -160,15 +160,11 @@ class MasterXTBot:
             if quantity <= 0:
                 quantity = 0.001
 
-            # چاپ دقیق ارور ارسال سفارش خرید در لاگ
+            # استفاده از پارامترهای استاندارد کتابخانه pyxt
             try:
-                xt.send_order(symbol=symbol, orderSide="BUY", orderType="MARKET", quantity=str(quantity), positionSide="LONG")
+                xt.send_order(symbol=symbol, order_side="BUY", order_type="MARKET", qty=str(quantity), position_side="LONG")
             except Exception as e:
                 print(f"🔴 خطای دقیق ارسال سفارش خرید ({symbol}): {e}")
-                try:
-                    xt.send_order(symbol=symbol, order_side="BUY", order_type="MARKET", qty=str(quantity), position_side="LONG")
-                except Exception as e2:
-                    print(f"🔴 خطای دوم ارسال سفارش خرید ({symbol}): {e2}")
             
             tp1 = price * 1.012
             sl = price * 0.990
@@ -201,13 +197,9 @@ def manage_positions():
 
                         if current_price <= sl or current_price >= tp1:
                             try:
-                                xt.send_order(symbol=symbol, orderSide="SELL", orderType="MARKET", quantity=str(quantity), positionSide="LONG")
+                                xt.send_order(symbol=symbol, order_side="SELL", order_type="MARKET", qty=str(quantity), position_side="LONG")
                             except Exception as e:
                                 print(f"🔴 خطای دقیق بستن سفارش فروش ({symbol}): {e}")
-                                try:
-                                    xt.send_order(symbol=symbol, order_side="SELL", order_type="MARKET", qty=str(quantity), position_side="LONG")
-                                except Exception as e2:
-                                    print(f"🔴 خطای دوم بستن سفارش فروش ({symbol}): {e2}")
 
                             profit = (current_price - entry) * quantity
                             with datalock:
@@ -342,7 +334,7 @@ threading.Thread(target=manage_positions, daemon=True).start()
 if __name__ == "__main__":
     while True:
         try:
-            bot.infinity_polling(timeout=60, long_polling_timeout=60, remove_webhook=True)
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
         except Exception as e:
             print(f"⚠️ خطای پولینگ تلگرام: {e}")
             time.sleep(5)
