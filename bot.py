@@ -5,6 +5,7 @@ import datetime
 import os
 import sys
 import atexit
+import requests
 import pandas as pd
 import telebot
 from telebot import types
@@ -116,54 +117,25 @@ state = {
 
 class MasterXTBot:
     def get_data(self, symbol):
-        for attempt in range(3):
-            try:
-                # اصلاح نام متد به get_klines
-                res = xt.get_klines(symbol, interval='5m', limit=10)
-                if not res:
-                    time.sleep(1)
-                    continue
-
-                data = res[1] if isinstance(res, tuple) and len(res) > 1 else res
-                if isinstance(data, dict):
-                    data = data.get('result') or data.get('data') or data
-
-                if not data:
-                    return None
-
-                df = pd.DataFrame(data)
-                if df.empty:
-                    return None
-
-                if not isinstance(data, pd.DataFrame) and len(df.columns) == 1 and isinstance(df.iloc[0, 0], (list, tuple)):
-                    df = pd.DataFrame(df.iloc[:, 0].tolist(), columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-
-                col_mapping = {'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume',
-                               'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}
-                df.rename(columns=col_mapping, inplace=True)
-
-                if 'close' not in df.columns or 'open' not in df.columns:
-                    if len(df.columns) >= 5:
-                        df = df.iloc[:, [0, 1, 2, 3, 4]]
-                        df.columns = ['time', 'open', 'high', 'low', 'close']
-                    else:
-                        return None
-
-                df['close'] = pd.to_numeric(df['close'], errors='coerce')
-                df['open'] = pd.to_numeric(df['open'], errors='coerce')
-                df.dropna(subset=['close', 'open'], inplace=True)
-
-                if df.empty:
-                    return None
-
-                return df
-            except Exception as e:
-                print(f"خطا در دریافت کندل {symbol}: {e}")
-                time.sleep(1)
-        return None
+        try:
+            # دریافت مستقیم اطلاعات بازار از API رسمی XT بدون وابستگی به متدهای ناقص کتابخانه
+            url = "https://fapi.xt.com/future/market/v1/public/q/agg-tickers"
+            response = requests.get(url, timeout=5)
+            data = response.json()
+            result = data.get('result', [])
+            for item in result:
+                if item.get('s') == symbol:
+                    curr_close = float(item.get('c', 0))
+                    curr_open = float(item.get('o', curr_close))
+                    df = pd.DataFrame({'open': [curr_open], 'close': [curr_close]})
+                    return df
+            return None
+        except Exception as e:
+            print(f"خطا در دریافت اطلاعات {symbol}: {e}")
+            return None
 
     def analyze(self, df, symbol):
-        if df is None or len(df) < 2:
+        if df is None or len(df) < 1:
             return None, "داده ناقص است"
 
         curr_close = float(df['close'].iloc[-1])
@@ -330,7 +302,7 @@ def get_reply_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 ربات با سیستم لاگینگ و تحلیل زنده فعال شد:", reply_markup=get_reply_keyboard())
+    bot.send_message(message.chat.id, "🤖 ربات با سیستم ارتباط مستقیم فعال شد:", reply_markup=get_reply_keyboard())
 
 @bot.message_handler(func=lambda msg: True)
 def handle_text_buttons(message):
@@ -397,7 +369,7 @@ def handle_text_buttons(message):
             msg = "📈 پوزیشن‌های فعال:\n" + "".join([f"- {s} | حجم: {d['quantity']}\n" for s, d in positions_snapshot.items()])
             bot.send_message(chat_id, msg, reply_markup=get_reply_keyboard())
     elif text == "🟢 وضعیت سیستم هوشمند":
-        bot.send_message(chat_id, "🟢 سیستم تحلیلگر با لاگ‌برداری فعال است.", reply_markup=get_reply_keyboard())
+        bot.send_message(chat_id, "🟢 سیستم تحلیلگر با ارتباط مستقیم فعال است.", reply_markup=get_reply_keyboard())
 
 # راه‌اندازی تردهای موازی
 threading.Thread(target=trading_loop, daemon=True).start()
@@ -407,7 +379,7 @@ threading.Thread(target=self_healing_monitor, daemon=True).start()
 if __name__ == "__main__":
     while True:
         try:
-            print("🤖 ربات با سیستم لاگینگ زنده شروع به کار کرد...")
+            print("🤖 ربات با سیستم ارتباط مستقیم شروع به کار کرد...")
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
         except Exception as e:
             print(f"⚠️ خطای پولینگ تلگرام: {e}")
