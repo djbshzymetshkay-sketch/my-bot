@@ -14,7 +14,7 @@ from pyxt.perp import Perp
 # --- پیکربندی ---
 apikeyval = os.environ.get("XT_API_KEY", "11bfe446-a063-4ee0-8871-d7ecfd612db6")
 secretkeyval = os.environ.get("XT_SECRET_KEY", "f4442716939deb0ff2415e88503d26fc663c2738")
-tokenval = os.environ.get("TOKEN", "8763614980:AAHBbZejmL5K9rAKJXgTvyN2q-jnwyFFXw")
+tokenval = os.environ.get("TOKEN")
 chatidval = os.environ.get("CHAT_ID", "")
 positionsfile = "active_positions.json"
 
