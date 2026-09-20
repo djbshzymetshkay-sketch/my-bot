@@ -14,7 +14,7 @@ from pyxt.perp import Perp
 # --- پیکربندی ---
 apikeyval = os.environ.get("XT_API_KEY", "11bfe446-a063-4ee0-8871-d7ecfd612db6")
 secretkeyval = os.environ.get("XT_SECRET_KEY", "f4442716939deb0ff2415e88503d26fc663c2738")
-tokenval = os.environ.get("TOKEN", "8763614980:AAGIQXQtT7OkEmehPcaKeDYz6puNUjZeDGU")
+tokenval = os.environ.get("TOKEN", "8763614980:AAHBbZejmL5K9rAKJXgTvyN2q-jnwyFFXw")
 chatidval = os.environ.get("CHAT_ID", "")
 positionsfile = "active_positions.json"
 
@@ -134,7 +134,7 @@ class MasterXTBot:
         curr_open = float(df['open'].iloc[-1])
         percent_change = ((curr_close - curr_open) / curr_open) * 100
 
-        # تنظیم جدید برای حساسیت بالا و باز شدن سریع‌تر پوزیشن (0.05 درصد)
+        # تنظیم حساسیت روی 0.05 درصد
         if percent_change >= 0.05:
             return "BUY", f"صعودی (+{percent_change:.2f}%)"
         elif percent_change <= -0.05:
