@@ -134,11 +134,11 @@ class MasterXTBot:
         curr_open = float(df['open'].iloc[-1])
         percent_change = ((curr_close - curr_open) / curr_open) * 100
 
-        # شرط سخت‌گیرانه برای سیگنال معتبر
-        if percent_change >= 0.15:
-            return "BUY", f"صعودی قوی (+{percent_change:.2f}%)"
-        elif percent_change <= -0.15:
-            return "SELL", f"نزولی قوی ({percent_change:.2f}%)"
+        # تنظیم جدید برای حساسیت بالا و باز شدن سریع‌تر پوزیشن (0.05 درصد)
+        if percent_change >= 0.05:
+            return "BUY", f"صعودی (+{percent_change:.2f}%)"
+        elif percent_change <= -0.05:
+            return "SELL", f"نزولی ({percent_change:.2f}%)"
 
         return None, "روند خنثی"
 
@@ -207,7 +207,6 @@ class MasterXTBot:
             
             save_active_positions()
 
-            # قالب پیام حرفه‌ای دقیقا مشابه نمونه درخواستی شما
             sym_clean = symbol.upper().replace('_', '/')
             side_text = "LONG 🟢" if signal_type == "BUY" else "SHORT 🔴"
             
