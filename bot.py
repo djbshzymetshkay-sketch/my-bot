@@ -146,6 +146,7 @@ class MasterXTBot:
         try:
             balance = get_safe_balance()
             if balance < 0.5:
+                send_alert(f"⚠️ خطای معامله {symbol}: موجودی کافی نیست ({balance} USDT)")
                 return False
 
             with datalock:
@@ -168,6 +169,7 @@ class MasterXTBot:
             order_side = "BUY" if signal_type == "BUY" else "SELL"
 
             order_sent = False
+            last_error = None
             for kwargs in [
                 {"symbol": symbol, "order_side": order_side, "order_type": "MARKET", "quantity": str(quantity), "position_side": position_side},
                 {"symbol": symbol, "orderSide": order_side, "orderType": "MARKET", "quantity": str(quantity), "positionSide": position_side},
@@ -178,10 +180,14 @@ class MasterXTBot:
                     if res:
                         order_sent = True
                         break
-                except Exception:
+                except Exception as e:
+                    last_error = str(e)
                     continue
 
             if not order_sent:
+                err_msg = f"❌ خطای صرافی در باز کردن #{symbol.upper().replace('_', '/')}:\n`{last_error}`"
+                print(err_msg)
+                send_alert(err_msg)
                 return False
 
             if signal_type == "BUY":
@@ -400,7 +406,7 @@ def handle_text_buttons(message):
         with datalock:
             positions_snapshot = dict(active_positions)
         if not positions_snapshot:
-            bot.send_message(chat_id, "📭 پوزیشنی فعال نیست.", reply_markup=get_reply_keyboard())
+            bot.send_message(chat_id, f"📭 پوزیشنی فعال نیست.", reply_markup=get_reply_keyboard())
         else:
             msg = "📈 پوزیشن‌ها:\n" + "".join([f"- {s} ({p.get('type')})\n" for s, p in positions_snapshot.items()])
             bot.send_message(chat_id, msg, reply_markup=get_reply_keyboard())
