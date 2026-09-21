@@ -5,6 +5,7 @@ import datetime
 import os
 import sys
 import atexit
+import inspect
 import requests
 import pandas as pd
 import telebot
@@ -144,6 +145,12 @@ class MasterXTBot:
 
     def execute_trade(self, symbol, signal_type, reason, price):
         try:
+            # چاپ دقیق پارامترهای تابع send_order در لاگ رایلی برای پیدا کردن کلمه درست
+            try:
+                print(f"DEBUG - send_order signature: {inspect.signature(xt.send_order)}")
+            except Exception as ex:
+                print(f"DEBUG signature error: {ex}")
+
             balance = get_safe_balance()
             if balance < 0.5:
                 send_alert(f"⚠️ خطای معامله {symbol}: موجودی کافی نیست ({balance} USDT)")
