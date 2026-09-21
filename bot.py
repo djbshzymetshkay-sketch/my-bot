@@ -128,8 +128,7 @@ class MasterXTBot:
                     df = pd.DataFrame({'open': [curr_open], 'close': [curr_close]})
                     return df
             return None
-        except Exception as e:
-            # از فرستادن خطای مکرر اینترنت در این بخش جلوگیری شده تا تلگرام اسپم نشود
+        except Exception:
             return None
 
     def analyze(self, df, symbol):
@@ -178,12 +177,12 @@ class MasterXTBot:
             order_sent = False
             last_error = None
             
-            # استفاده از کلمه درست order_side که از طریق لاگ به دست آمد
+            # استفاده از کلمه صحیح amount به جای quantity
             kwargs = {
                 "symbol": symbol,
                 "order_side": order_side,
                 "order_type": "MARKET",
-                "quantity": str(quantity),
+                "amount": str(quantity),
                 "position_side": position_side
             }
             
@@ -280,7 +279,7 @@ def manage_positions():
                                 "symbol": symbol,
                                 "order_side": close_side,
                                 "order_type": "MARKET",
-                                "quantity": str(quantity),
+                                "amount": str(quantity),
                                 "position_side": close_pos_side
                             }
                             
@@ -317,7 +316,7 @@ def manage_positions():
                             )
                             send_alert(close_msg)
             time.sleep(5)
-        except Exception as e:
+        except Exception:
             time.sleep(10)
 
 def trading_loop():
@@ -342,7 +341,7 @@ def trading_loop():
                                     break
                         time.sleep(0.5)
             time.sleep(5)
-        except Exception as e:
+        except Exception:
             time.sleep(10)
 
 def get_reply_keyboard():
@@ -433,11 +432,10 @@ threading.Thread(target=trading_loop, daemon=True).start()
 threading.Thread(target=manage_positions, daemon=True).start()
 
 if __name__ == "__main__":
-    while True:
+    while __name__ == "__main__":
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
         except Exception as e:
-            # ارسال خطای قطع اتصال ربات تلگرام
             try:
                 send_alert(f"⚠️ خطای پولینگ تلگرام:\n`{str(e)}`")
             except:
