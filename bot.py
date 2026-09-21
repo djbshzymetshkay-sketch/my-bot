@@ -56,7 +56,8 @@ def get_safe_balance():
                 bal = result.get('walletBalance') or result.get('availableBalance') or result.get('balance')
                 if bal is not None: return float(bal)
         return 0.0
-    except Exception:
+    except Exception as e:
+        send_alert(f"⚠️ خطا در دریافت موجودی حساب:\n`{str(e)}`")
         return 0.0
 
 def safe_save_json(filepath, data):
@@ -65,7 +66,8 @@ def safe_save_json(filepath, data):
         with open(temp_file, 'w') as f:
             json.dump(data, f, indent=4)
         os.replace(temp_file, filepath)
-    except Exception:
+    except Exception as e:
+        send_alert(f"⚠️ خطا در ذخیره فایل اطلاعات:\n`{str(e)}`")
         if os.path.exists(temp_file):
             try: os.remove(temp_file)
             except: pass
@@ -94,7 +96,9 @@ def load_active_positions():
     if os.path.exists(positionsfile):
         try:
             with open(positionsfile, 'r') as f: return json.load(f)
-        except: return {}
+        except Exception as e:
+            send_alert(f"⚠️ خطا در خواندن پوزیشن‌های فعال:\n`{str(e)}`")
+            return {}
     return {}
 
 def save_active_positions():
@@ -124,7 +128,8 @@ class MasterXTBot:
                     df = pd.DataFrame({'open': [curr_open], 'close': [curr_close]})
                     return df
             return None
-        except Exception:
+        except Exception as e:
+            # از فرستادن خطای مکرر اینترنت در این بخش جلوگیری شده تا تلگرام اسپم نشود
             return None
 
     def analyze(self, df, symbol):
@@ -135,7 +140,6 @@ class MasterXTBot:
         curr_open = float(df['open'].iloc[-1])
         percent_change = ((curr_close - curr_open) / curr_open) * 100
 
-        # تنظیم حساسیت روی 0.05 درصد
         if percent_change >= 0.05:
             return "BUY", f"صعودی (+{percent_change:.2f}%)"
         elif percent_change <= -0.05:
@@ -145,15 +149,11 @@ class MasterXTBot:
 
     def execute_trade(self, symbol, signal_type, reason, price):
         try:
-            # چاپ دقیق پارامترهای تابع send_order در لاگ رایلی برای پیدا کردن کلمه درست
-            try:
-                print(f"DEBUG - send_order signature: {inspect.signature(xt.send_order)}")
-            except Exception as ex:
-                print(f"DEBUG signature error: {ex}")
-
             balance = get_safe_balance()
             if balance < 0.5:
-                send_alert(f"⚠️ خطای معامله {symbol}: موجودی کافی نیست ({balance} USDT)")
+                err_msg = f"⚠️ خطای معامله {symbol}: موجودی کافی نیست یا صفر است ({balance} USDT)"
+                print(err_msg)
+                send_alert(err_msg)
                 return False
 
             with datalock:
@@ -163,8 +163,8 @@ class MasterXTBot:
             try:
                 if hasattr(xt, 'set_account_leverage'):
                     xt.set_account_leverage(symbol=symbol, leverage=lev)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Leverage warning: {e}")
 
             capital_in_trade = balance * cap_percent
             raw_qty = (capital_in_trade * lev) / price if price > 0 else 0
@@ -177,19 +177,22 @@ class MasterXTBot:
 
             order_sent = False
             last_error = None
-            for kwargs in [
-                {"symbol": symbol, "order_side": order_side, "order_type": "MARKET", "quantity": str(quantity), "position_side": position_side},
-                {"symbol": symbol, "orderSide": order_side, "orderType": "MARKET", "quantity": str(quantity), "positionSide": position_side},
-                {"symbol": symbol, "side": order_side, "type": "MARKET", "amount": str(quantity)}
-            ]:
-                try:
-                    res = xt.send_order(**kwargs)
-                    if res:
-                        order_sent = True
-                        break
-                except Exception as e:
-                    last_error = str(e)
-                    continue
+            
+            # استفاده از کلمه درست order_side که از طریق لاگ به دست آمد
+            kwargs = {
+                "symbol": symbol,
+                "order_side": order_side,
+                "order_type": "MARKET",
+                "quantity": str(quantity),
+                "position_side": position_side
+            }
+            
+            try:
+                res = xt.send_order(**kwargs)
+                if res:
+                    order_sent = True
+            except Exception as e:
+                last_error = str(e)
 
             if not order_sent:
                 err_msg = f"❌ خطای صرافی در باز کردن #{symbol.upper().replace('_', '/')}:\n`{last_error}`"
@@ -237,7 +240,10 @@ class MasterXTBot:
             )
             send_alert(msg)
             return True
-        except Exception:
+        except Exception as e:
+            err_msg = f"❌ خطای کلی در اجرای تابع معامله برای {symbol}:\n`{str(e)}`"
+            print(err_msg)
+            send_alert(err_msg)
             return False
 
 def manage_positions():
@@ -270,16 +276,18 @@ def manage_positions():
                             close_side = "SELL" if pos_type == 'BUY' else "BUY"
                             close_pos_side = "LONG" if pos_type == 'BUY' else "SHORT"
                             
-                            for kwargs in [
-                                {"symbol": symbol, "order_side": close_side, "order_type": "MARKET", "quantity": str(quantity), "position_side": close_pos_side},
-                                {"symbol": symbol, "orderSide": close_side, "orderType": "MARKET", "quantity": str(quantity), "position_side": close_pos_side},
-                                {"symbol": symbol, "side": close_side, "type": "MARKET", "amount": str(quantity)}
-                            ]:
-                                try:
-                                    xt.send_order(**kwargs)
-                                    break
-                                except Exception:
-                                    continue
+                            close_kwargs = {
+                                "symbol": symbol,
+                                "order_side": close_side,
+                                "order_type": "MARKET",
+                                "quantity": str(quantity),
+                                "position_side": close_pos_side
+                            }
+                            
+                            try:
+                                xt.send_order(**close_kwargs)
+                            except Exception as e:
+                                send_alert(f"⚠️ خطا در بستن پوزیشن {symbol}:\n`{str(e)}`")
 
                             if pos_type == 'BUY':
                                 profit = (current_price - entry) * quantity
@@ -309,7 +317,7 @@ def manage_positions():
                             )
                             send_alert(close_msg)
             time.sleep(5)
-        except Exception:
+        except Exception as e:
             time.sleep(10)
 
 def trading_loop():
@@ -334,7 +342,7 @@ def trading_loop():
                                     break
                         time.sleep(0.5)
             time.sleep(5)
-        except Exception:
+        except Exception as e:
             time.sleep(10)
 
 def get_reply_keyboard():
@@ -389,16 +397,16 @@ def handle_text_buttons(message):
             with datalock:
                 state['capital_percent'] = val / 100.0
             bot.send_message(chat_id, f"✅ سرمایه تنظیم شد.", reply_markup=get_reply_keyboard())
-        except:
-            pass
+        except Exception as e:
+            bot.send_message(chat_id, f"⚠️ خطا در تنظیم سرمایه: {e}")
     elif text.startswith("اهرم: "):
         try:
             val = int(text.replace("اهرم: ", "").replace("x", ""))
             with datalock:
                 state['leverage'] = val
             bot.send_message(chat_id, f"✅ اهرم تنظیم شد.", reply_markup=get_reply_keyboard())
-        except:
-            pass
+        except Exception as e:
+            bot.send_message(chat_id, f"⚠️ خطا در تنظیم اهرم: {e}")
     elif text == "🔙 بازگشت به منوی اصلی":
         bot.send_message(chat_id, "منوی اصلی:", reply_markup=get_reply_keyboard())
     elif text == "🔍 موجودی":
@@ -428,5 +436,10 @@ if __name__ == "__main__":
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
-        except Exception:
+        except Exception as e:
+            # ارسال خطای قطع اتصال ربات تلگرام
+            try:
+                send_alert(f"⚠️ خطای پولینگ تلگرام:\n`{str(e)}`")
+            except:
+                pass
             time.sleep(5)
