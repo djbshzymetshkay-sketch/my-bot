@@ -177,7 +177,6 @@ class MasterXTBot:
             order_sent = False
             last_error = None
             
-            # استفاده از کلمه صحیح amount به جای quantity
             kwargs = {
                 "symbol": symbol,
                 "order_side": order_side,
@@ -188,6 +187,7 @@ class MasterXTBot:
             
             try:
                 res = xt.send_order(**kwargs)
+                print(f"DEBUG XT Response for {symbol}: {res}") # چاپ پاسخ خام صرافی در لاگ رایلی
                 if res:
                     order_sent = True
             except Exception as e:
@@ -284,7 +284,8 @@ def manage_positions():
                             }
                             
                             try:
-                                xt.send_order(**close_kwargs)
+                                close_res = xt.send_order(**close_kwargs)
+                                print(f"DEBUG Close Response for {symbol}: {close_res}")
                             except Exception as e:
                                 send_alert(f"⚠️ خطا در بستن پوزیشن {symbol}:\n`{str(e)}`")
 
